@@ -11,6 +11,12 @@ type bpftraceListener interface {
 	// EnterProgram is called when entering the program production.
 	EnterProgram(c *ProgramContext)
 
+	// EnterShebang_section is called when entering the shebang_section production.
+	EnterShebang_section(c *Shebang_sectionContext)
+
+	// EnterContent is called when entering the content production.
+	EnterContent(c *ContentContext)
+
 	// EnterShebang is called when entering the shebang production.
 	EnterShebang(c *ShebangContext)
 
@@ -127,6 +133,12 @@ type bpftraceListener interface {
 
 	// ExitProgram is called when exiting the program production.
 	ExitProgram(c *ProgramContext)
+
+	// ExitShebang_section is called when exiting the shebang_section production.
+	ExitShebang_section(c *Shebang_sectionContext)
+
+	// ExitContent is called when exiting the content production.
+	ExitContent(c *ContentContext)
 
 	// ExitShebang is called when exiting the shebang production.
 	ExitShebang(c *ShebangContext)

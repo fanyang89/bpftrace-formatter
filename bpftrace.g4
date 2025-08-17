@@ -4,7 +4,15 @@
 grammar bpftrace;
 
 program
-    : (shebang? NEWLINE*)? (probe | comment)* EOF
+    : shebang_section? content EOF
+    ;
+
+shebang_section
+    : shebang NEWLINE*
+    ;
+
+content
+    : (probe | comment | NEWLINE)*
     ;
 
 shebang

@@ -27,6 +27,18 @@ func (s *BasebpftraceListener) EnterProgram(ctx *ProgramContext) {}
 // ExitProgram is called when production program is exited.
 func (s *BasebpftraceListener) ExitProgram(ctx *ProgramContext) {}
 
+// EnterShebang_section is called when production shebang_section is entered.
+func (s *BasebpftraceListener) EnterShebang_section(ctx *Shebang_sectionContext) {}
+
+// ExitShebang_section is called when production shebang_section is exited.
+func (s *BasebpftraceListener) ExitShebang_section(ctx *Shebang_sectionContext) {}
+
+// EnterContent is called when production content is entered.
+func (s *BasebpftraceListener) EnterContent(ctx *ContentContext) {}
+
+// ExitContent is called when production content is exited.
+func (s *BasebpftraceListener) ExitContent(ctx *ContentContext) {}
+
 // EnterShebang is called when production shebang is entered.
 func (s *BasebpftraceListener) EnterShebang(ctx *ShebangContext) {}
 
