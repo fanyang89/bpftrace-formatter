@@ -1,307 +1,150 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
 	"os"
-	"regexp"
+	"path/filepath"
 	"strings"
 
-	"github.com/antlr4-go/antlr/v4"
-	"github.com/fanyang89/bpftrace-formatter/parser"
+	"github.com/fanyang89/bpftrace-formatter/config"
+	"github.com/fanyang89/bpftrace-formatter/formatter"
 )
-
-// TokenType represents the type of token
-type TokenType int
-
-const (
-	TokenEOF TokenType = iota
-	TokenProbe
-	TokenPredicate
-	TokenBlockStart
-	TokenBlockEnd
-	TokenStatement
-	TokenComment
-	TokenNewline
-	TokenWhitespace
-)
-
-// Token represents a lexical token
-type Token struct {
-	Type   TokenType
-	Value  string
-	Line   int
-	Column int
-}
-
-// Formatter handles bpftrace script formatting
-type Formatter struct {
-	indentSize    int
-	useSpaces     bool
-	probeSpacing  int
-	commentIndent int
-}
-
-// NewFormatter creates a new formatter with default settings
-func NewFormatter() *Formatter {
-	return &Formatter{
-		indentSize:    4,
-		useSpaces:     true,
-		probeSpacing:  2,
-		commentIndent: 2,
-	}
-}
-
-// Format formats a bpftrace script
-func (f *Formatter) Format(input string) string {
-	// Pre-process: handle shebang and comments
-	lines := strings.Split(input, "\n")
-	var processedLines []string
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			processedLines = append(processedLines, "")
-			continue
-		}
-
-		// Add blank line after shebang
-		if strings.HasPrefix(line, "#!") && i < len(lines)-1 {
-			processedLines = append(processedLines, line)
-			processedLines = append(processedLines, "")
-			continue
-		}
-
-		processedLines = append(processedLines, line)
-	}
-
-	processedInput := strings.Join(processedLines, "\n")
-	tokens := f.tokenize(processedInput)
-	return f.formatTokens(tokens)
-}
-
-// tokenize breaks the input into tokens
-func (f *Formatter) tokenize(input string) []Token {
-	var tokens []Token
-	scanner := bufio.NewScanner(strings.NewReader(input))
-	lineNum := 0
-
-	for scanner.Scan() {
-		lineNum++
-		line := strings.TrimRight(scanner.Text(), " \t")
-
-		if line == "" {
-			tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
-			continue
-		}
-
-		// Handle comments
-		if strings.HasPrefix(strings.TrimSpace(line), "//") {
-			tokens = append(tokens, Token{Type: TokenComment, Value: line, Line: lineNum})
-			tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
-			continue
-		}
-
-		// Handle shebang
-		if strings.HasPrefix(line, "#!") {
-			tokens = append(tokens, Token{Type: TokenComment, Value: line, Line: lineNum})
-			tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
-			continue
-		}
-
-		// Use regex to find probe patterns
-		probePattern := `^(\s*)([a-zA-Z_][a-zA-Z0-9_]*:[^{\s]*)\s*(/[^/]+/)?\s*\{(.*)\}\s*$`
-		re := regexp.MustCompile(probePattern)
-
-		if matches := re.FindStringSubmatch(line); matches != nil {
-			probeDef := strings.TrimSpace(matches[2])
-			predicate := matches[3]
-			content := strings.TrimSpace(matches[4])
-
-			// Add probe token
-			tokens = append(tokens, Token{Type: TokenProbe, Value: probeDef, Line: lineNum})
-
-			// Add predicate if present
-			if predicate != "" {
-				tokens = append(tokens, Token{Type: TokenPredicate, Value: predicate, Line: lineNum})
-			}
-
-			// Add block and content
-			tokens = append(tokens, Token{Type: TokenBlockStart, Value: "{", Line: lineNum})
-			if content != "" {
-				// Split content by semicolons and create separate statements
-				statements := strings.Split(content, ";")
-				for i, stmt := range statements {
-					stmt = strings.TrimSpace(stmt)
-					if stmt != "" {
-						tokens = append(tokens, Token{Type: TokenStatement, Value: stmt + ";", Line: lineNum})
-						// Add newline after each statement except the last one
-						if i < len(statements)-1 {
-							tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
-						}
-					}
-				}
-			}
-			tokens = append(tokens, Token{Type: TokenBlockEnd, Value: "}", Line: lineNum})
-		} else {
-			// Handle standalone statements (like END blocks)
-			if strings.Contains(line, "{") || strings.Contains(line, "}") {
-				// Simple block handling for non-probe statements
-				if strings.HasPrefix(line, "END") {
-					// Special handling for END blocks
-					tokens = append(tokens, Token{Type: TokenProbe, Value: "END", Line: lineNum})
-					content := strings.Trim(strings.TrimPrefix(line, "END"), " {}")
-					if content != "" {
-						tokens = append(tokens, Token{Type: TokenBlockStart, Value: "{", Line: lineNum})
-						// Split content by semicolons and create separate statements
-						statements := strings.Split(content, ";")
-						for i, stmt := range statements {
-							stmt = strings.TrimSpace(stmt)
-							if stmt != "" {
-								tokens = append(tokens, Token{Type: TokenStatement, Value: stmt + ";", Line: lineNum})
-								// Add newline after each statement except the last one
-								if i < len(statements)-1 {
-									tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
-								}
-							}
-						}
-						tokens = append(tokens, Token{Type: TokenBlockEnd, Value: "}", Line: lineNum})
-					}
-				} else {
-					tokens = append(tokens, Token{Type: TokenStatement, Value: line, Line: lineNum})
-				}
-			} else {
-				tokens = append(tokens, Token{Type: TokenStatement, Value: line, Line: lineNum})
-			}
-		}
-
-		tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
-	}
-
-	return tokens
-}
-
-// formatTokens formats the tokens into a properly indented script
-func (f *Formatter) formatTokens(tokens []Token) string {
-	var result strings.Builder
-	indentLevel := 0
-	lastTokenWasProbe := false
-	needIndent := false
-
-	for i, token := range tokens {
-		switch token.Type {
-		case TokenProbe:
-			// Add spacing between probes
-			if lastTokenWasProbe && i > 0 {
-				for j := 0; j < f.probeSpacing; j++ {
-					result.WriteString("\n")
-				}
-			}
-			result.WriteString(token.Value)
-			lastTokenWasProbe = true
-			needIndent = false
-
-		case TokenPredicate:
-			result.WriteString(" ")
-			result.WriteString(strings.TrimSpace(token.Value))
-			needIndent = false
-
-		case TokenBlockStart:
-			result.WriteString(" {\n")
-			indentLevel++
-			needIndent = true
-
-		case TokenBlockEnd:
-			indentLevel--
-			if indentLevel >= 0 {
-				result.WriteString("\n")
-				result.WriteString(f.indent(indentLevel))
-				result.WriteString("}")
-			}
-			needIndent = false
-
-		case TokenStatement:
-			if strings.TrimSpace(token.Value) != "" {
-				if needIndent {
-					result.WriteString(f.indent(indentLevel))
-					needIndent = false
-				}
-				result.WriteString(strings.TrimSpace(token.Value))
-			}
-
-		case TokenComment:
-			if needIndent {
-				result.WriteString(f.indent(indentLevel))
-				needIndent = false
-			}
-			result.WriteString(token.Value)
-
-		case TokenNewline:
-			if i < len(tokens)-1 && tokens[i+1].Type != TokenBlockEnd {
-				result.WriteString("\n")
-				if tokens[i+1].Type == TokenStatement || tokens[i+1].Type == TokenComment {
-					needIndent = true
-				}
-			}
-
-		case TokenEOF:
-			// Do nothing
-		}
-	}
-
-	return strings.TrimSpace(result.String())
-}
-
-// indent returns the appropriate indentation string
-func (f *Formatter) indent(level int) string {
-	if f.useSpaces {
-		return strings.Repeat(" ", level*f.indentSize)
-	}
-	return strings.Repeat("\t", level)
-}
-
-// SetIndentSize sets the indentation size
-func (f *Formatter) SetIndentSize(size int) {
-	f.indentSize = size
-}
-
-// SetUseSpaces sets whether to use spaces instead of tabs
-func (f *Formatter) SetUseSpaces(useSpaces bool) {
-	f.useSpaces = useSpaces
-}
-
-// SetProbeSpacing sets the number of blank lines between probes
-func (f *Formatter) SetProbeSpacing(spacing int) {
-	f.probeSpacing = spacing
-}
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: bpftrace-formatter <file.bt>")
+	// Parse command line flags
+	var (
+		generateConfig = flag.Bool("generate-config", false, "Generate default configuration file")
+		configOutput   = flag.String("config-output", ".btfmt.json", "Output path for generated config")
+		inPlace        = flag.Bool("i", false, "Edit files in place")
+		write          = flag.Bool("w", false, "Write result to source file instead of stdout")
+		help           = flag.Bool("help", false, "Show help message")
+	)
+
+	// Create config loader
+	configLoader := config.NewConfigLoader()
+	configLoader.ParseFlags()
+
+	// Handle help
+	if *help {
+		printUsage()
+		return
+	}
+
+	// Handle config generation
+	if *generateConfig {
+		err := configLoader.GenerateDefaultConfig(*configOutput)
+		if err != nil {
+			fmt.Printf("Error generating config: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Generated default configuration at: %s\n", *configOutput)
+		return
+	}
+
+	// Get remaining arguments (input files)
+	args := flag.Args()
+	if len(args) == 0 {
+		fmt.Println("Error: No input files specified")
+		printUsage()
 		os.Exit(1)
 	}
 
-	filename := os.Args[1]
+	// Load configuration
+	cfg, err := configLoader.LoadConfig()
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Process each input file
+	for _, filename := range args {
+		err := processFile(filename, cfg, *inPlace || *write, configLoader.GetVerbose())
+		if err != nil {
+			fmt.Printf("Error processing %s: %v\n", filename, err)
+			os.Exit(1)
+		}
+	}
+}
+
+// processFile processes a single bpftrace file
+func processFile(filename string, cfg *config.Config, writeToFile bool, verbose bool) error {
+	// Read input file
 	content, err := os.ReadFile(filename)
 	if err != nil {
-		fmt.Printf("Error reading file: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("reading file: %w", err)
 	}
 
-	// Use the ANTLR-based parser
-	input := antlr.NewInputStream(string(content))
-	lexer := parser.NewbpftraceLexer(input)
-	stream := antlr.NewCommonTokenStream(lexer, 0)
-	bpftraceParser := parser.NewbpftraceParser(stream)
+	if verbose {
+		fmt.Printf("Processing: %s\n", filename)
+	}
 
-	// Parse the program
-	tree := bpftraceParser.Program()
+	// Create formatter and format the content
+	astFormatter := formatter.NewASTFormatter(cfg)
+	formatted, err := astFormatter.Format(string(content))
+	if err != nil {
+		return fmt.Errorf("formatting: %w", err)
+	}
 
-	// For now, use the old formatter until we implement AST-based formatting
-	// TODO: Implement AST-based formatter using the parse tree
-	_ = tree // Suppress unused variable warning
-	oldFormatter := NewFormatter()
-	formatted := oldFormatter.Format(string(content))
+	// Output result
+	if writeToFile {
+		// Write back to the original file
+		err = os.WriteFile(filename, []byte(formatted), 0644)
+		if err != nil {
+			return fmt.Errorf("writing file: %w", err)
+		}
+		if verbose {
+			fmt.Printf("Formatted: %s\n", filename)
+		}
+	} else {
+		// Print to stdout
+		fmt.Print(formatted)
+		if !strings.HasSuffix(formatted, "\n") {
+			fmt.Println()
+		}
+	}
 
-	fmt.Println(formatted)
+	return nil
+}
+
+// printUsage prints usage information
+func printUsage() {
+	fmt.Printf(`bpftrace-formatter - A formatter for bpftrace scripts
+
+Usage:
+  %s [options] <file.bt> [file2.bt ...]
+
+Options:
+  -c, -config <file>     Path to configuration file
+  -i                     Edit files in place
+  -w                     Write result to source file instead of stdout
+  -v, -verbose           Enable verbose output
+  -generate-config       Generate default configuration file
+  -config-output <file>  Output path for generated config (default: .btfmt.json)
+  -help                  Show this help message
+
+Examples:
+  # Format a file and print to stdout
+  %s script.bt
+  
+  # Format a file in place
+  %s -i script.bt
+  
+  # Format multiple files
+  %s -w file1.bt file2.bt file3.bt
+  
+  # Generate default configuration
+  %s -generate-config
+  
+  # Use custom configuration
+  %s -config my-config.json script.bt
+
+Configuration:
+  The formatter looks for configuration files in this order:
+  1. File specified with -config flag
+  2. .btfmt.json in current directory or parent directories
+  3. ~/.btfmt.json in home directory
+  4. Built-in defaults if no config file is found
+
+`, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]), filepath.Base(os.Args[0]), filepath.Base(os.Args[0]), filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 }

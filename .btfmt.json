@@ -1,0 +1,36 @@
+{
+  "indent": {
+    "size": 4,
+    "use_spaces": true
+  },
+  "spacing": {
+    "around_operators": true,
+    "around_commas": true,
+    "around_parentheses": false,
+    "around_brackets": false,
+    "before_block_start": true,
+    "after_keywords": true
+  },
+  "line_breaks": {
+    "max_line_length": 80,
+    "break_long_statements": true,
+    "empty_lines_between_probes": 1,
+    "empty_lines_after_shebang": 1
+  },
+  "comments": {
+    "preserve_inline": true,
+    "align_inline": false,
+    "indent_level": 0
+  },
+  "probes": {
+    "align_predicates": false,
+    "sort_probes": false,
+    "group_by_type": false
+  },
+  "blocks": {
+    "brace_style": "same_line",
+    "indent_statements": true,
+    "empty_line_in_blocks": false,
+    "align_assignments": false
+  }
+}

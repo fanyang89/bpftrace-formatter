@@ -25,7 +25,7 @@ probe
     ;
 
 probe_def
-    : PROBE_TYPE (':' PROBE_TYPE)*
+    : PROBE_TYPE (':' (IDENTIFIER | NUMBER))* ('*')?
     ;
 
 predicate
@@ -93,6 +93,7 @@ return_statement
 clear_statement
     : CLEAR MAP_NAME
     | CLEAR '@' ('[' expression (',' expression)* ']')?
+    | CLEAR '(' (MAP_NAME | '@' | variable) ')'
     ;
 
 delete_statement
@@ -151,7 +152,7 @@ unary_expression
     ;
 
 postfix_expression
-    : primary_expression (('++' | '--') | '[' expression (',' expression)* ']' | '(' expr_list? ')' | '.' IDENTIFIER)?
+    : primary_expression (('++' | '--') | '[' expression (',' expression)* ']' | '(' expr_list? ')' | '.' IDENTIFIER | '->' IDENTIFIER)*
     ;
 
 primary_expression
@@ -161,6 +162,7 @@ primary_expression
     | map_access
     | '(' expression ')'
     | function_call
+    | builtin_name
     ;
 
 variable
@@ -373,6 +375,10 @@ SHL
 
 SHR
     : '>>'
+    ;
+
+ARROW
+    : '->'
     ;
 
 // Assignment operators
