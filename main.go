@@ -55,12 +55,20 @@ func (f *Formatter) Format(input string) string {
 	lines := strings.Split(input, "\n")
 	var processedLines []string
 
-	for _, line := range lines {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			processedLines = append(processedLines, "")
 			continue
 		}
+
+		// Add blank line after shebang
+		if strings.HasPrefix(line, "#!") && i < len(lines)-1 {
+			processedLines = append(processedLines, line)
+			processedLines = append(processedLines, "")
+			continue
+		}
+
 		processedLines = append(processedLines, line)
 	}
 
@@ -118,7 +126,18 @@ func (f *Formatter) tokenize(input string) []Token {
 			// Add block and content
 			tokens = append(tokens, Token{Type: TokenBlockStart, Value: "{", Line: lineNum})
 			if content != "" {
-				tokens = append(tokens, Token{Type: TokenStatement, Value: content, Line: lineNum})
+				// Split content by semicolons and create separate statements
+				statements := strings.Split(content, ";")
+				for i, stmt := range statements {
+					stmt = strings.TrimSpace(stmt)
+					if stmt != "" {
+						tokens = append(tokens, Token{Type: TokenStatement, Value: stmt + ";", Line: lineNum})
+						// Add newline after each statement except the last one
+						if i < len(statements)-1 {
+							tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
+						}
+					}
+				}
 			}
 			tokens = append(tokens, Token{Type: TokenBlockEnd, Value: "}", Line: lineNum})
 		} else {
@@ -131,7 +150,18 @@ func (f *Formatter) tokenize(input string) []Token {
 					content := strings.Trim(strings.TrimPrefix(line, "END"), " {}")
 					if content != "" {
 						tokens = append(tokens, Token{Type: TokenBlockStart, Value: "{", Line: lineNum})
-						tokens = append(tokens, Token{Type: TokenStatement, Value: content, Line: lineNum})
+						// Split content by semicolons and create separate statements
+						statements := strings.Split(content, ";")
+						for i, stmt := range statements {
+							stmt = strings.TrimSpace(stmt)
+							if stmt != "" {
+								tokens = append(tokens, Token{Type: TokenStatement, Value: stmt + ";", Line: lineNum})
+								// Add newline after each statement except the last one
+								if i < len(statements)-1 {
+									tokens = append(tokens, Token{Type: TokenNewline, Value: "\n", Line: lineNum})
+								}
+							}
+						}
 						tokens = append(tokens, Token{Type: TokenBlockEnd, Value: "}", Line: lineNum})
 					}
 				} else {
