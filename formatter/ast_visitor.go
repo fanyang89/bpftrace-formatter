@@ -193,7 +193,6 @@ func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 
 	// Visit all statements in the block
 	for _, stmt := range ctx.AllStatement() {
-		v.formatter.writeIndent()
 		v.Visit(stmt)
 		v.formatter.writeSemicolon()
 		v.formatter.writeNewline()
@@ -343,7 +342,7 @@ func (v *ASTVisitor) visitReturnStatement(ctx *parser.Return_statementContext) {
 
 // visitClearStatement visits a clear statement
 func (v *ASTVisitor) visitClearStatement(ctx *parser.Clear_statementContext) {
-	v.formatter.writeKeyword("clear")
+	v.formatter.writeString("clear")
 	v.formatter.writeOpenParen()
 
 	// Handle the argument (map name or variable)

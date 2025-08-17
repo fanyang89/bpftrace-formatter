@@ -202,6 +202,7 @@ func (f *ASTFormatter) writeBlockStart() {
 func (f *ASTFormatter) writeBlockEnd() {
 	f.decreaseIndent()
 	f.ensureNewline()
+	f.writeIndent()
 	f.writeString("}")
 }
 
