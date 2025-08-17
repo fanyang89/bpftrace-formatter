@@ -105,7 +105,7 @@ func DefaultConfig() *Config {
 			GroupByType:     false,
 		},
 		Blocks: BlockConfig{
-			BraceStyle:        "same_line",
+			BraceStyle:        "next_line",
 			IndentStatements:  true,
 			EmptyLineInBlocks: false,
 			AlignAssignments:  false,

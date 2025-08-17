@@ -190,10 +190,21 @@ func (f *ASTFormatter) writeCloseBracket() {
 
 // writeBlockStart writes a block start with appropriate spacing and indentation
 func (f *ASTFormatter) writeBlockStart() {
-	if f.config.Spacing.BeforeBlockStart {
-		f.writeSpace()
+	switch f.config.Blocks.BraceStyle {
+	case "next_line":
+		f.writeNewline()
+		f.writeString("{")
+	case "same_line":
+		if f.config.Spacing.BeforeBlockStart {
+			f.writeSpace()
+		}
+		f.writeString("{")
+	default: // default to same_line
+		if f.config.Spacing.BeforeBlockStart {
+			f.writeSpace()
+		}
+		f.writeString("{")
 	}
-	f.writeString("{")
 	f.writeNewline()
 	f.increaseIndent()
 }

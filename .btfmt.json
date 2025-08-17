@@ -28,7 +28,7 @@
     "group_by_type": false
   },
   "blocks": {
-    "brace_style": "same_line",
+    "brace_style": "next_line",
     "indent_statements": true,
     "empty_line_in_blocks": false,
     "align_assignments": false
