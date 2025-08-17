@@ -70,6 +70,22 @@ func (v *ASTVisitor) Visit(tree antlr.Tree) {
 		v.visitPrintfStatement(t)
 	case *parser.ExpressionContext:
 		v.visitExpression(t)
+	case *parser.Logical_or_expressionContext:
+		v.visitLogicalOrExpression(t)
+	case *parser.Logical_and_expressionContext:
+		v.visitLogicalAndExpression(t)
+	case *parser.Equality_expressionContext:
+		v.visitEqualityExpression(t)
+	case *parser.Relational_expressionContext:
+		v.visitRelationalExpression(t)
+	case *parser.Shift_expressionContext:
+		v.visitShiftExpression(t)
+	case *parser.Additive_expressionContext:
+		v.visitAdditiveExpression(t)
+	case *parser.Multiplicative_expressionContext:
+		v.visitMultiplicativeExpression(t)
+	case *parser.Unary_expressionContext:
+		v.visitUnaryExpression(t)
 	case *parser.Expr_listContext:
 		v.visitExprList(t)
 	case *parser.Postfix_expressionContext:
@@ -441,6 +457,109 @@ func (v *ASTVisitor) visitComment(ctx *parser.CommentContext) {
 	}
 	v.formatter.writeString(commentText)
 	v.formatter.writeNewline()
+}
+
+// visitLogicalOrExpression visits a logical OR expression
+func (v *ASTVisitor) visitLogicalOrExpression(ctx *parser.Logical_or_expressionContext) {
+	children := ctx.GetChildren()
+	for i, child := range children {
+		if i > 0 && i%2 == 1 {
+			// This is an operator
+			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+		} else {
+			// This is an operand
+			v.Visit(child)
+		}
+	}
+}
+
+// visitLogicalAndExpression visits a logical AND expression
+func (v *ASTVisitor) visitLogicalAndExpression(ctx *parser.Logical_and_expressionContext) {
+	children := ctx.GetChildren()
+	for i, child := range children {
+		if i > 0 && i%2 == 1 {
+			// This is an operator
+			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+		} else {
+			// This is an operand
+			v.Visit(child)
+		}
+	}
+}
+
+// visitEqualityExpression visits an equality expression
+func (v *ASTVisitor) visitEqualityExpression(ctx *parser.Equality_expressionContext) {
+	children := ctx.GetChildren()
+	for i, child := range children {
+		if i > 0 && i%2 == 1 {
+			// This is an operator
+			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+		} else {
+			// This is an operand
+			v.Visit(child)
+		}
+	}
+}
+
+// visitRelationalExpression visits a relational expression
+func (v *ASTVisitor) visitRelationalExpression(ctx *parser.Relational_expressionContext) {
+	children := ctx.GetChildren()
+	for i, child := range children {
+		if i > 0 && i%2 == 1 {
+			// This is an operator
+			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+		} else {
+			// This is an operand
+			v.Visit(child)
+		}
+	}
+}
+
+// visitShiftExpression visits a shift expression
+func (v *ASTVisitor) visitShiftExpression(ctx *parser.Shift_expressionContext) {
+	children := ctx.GetChildren()
+	for i, child := range children {
+		if i > 0 && i%2 == 1 {
+			// This is an operator
+			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+		} else {
+			// This is an operand
+			v.Visit(child)
+		}
+	}
+}
+
+// visitAdditiveExpression visits an additive expression
+func (v *ASTVisitor) visitAdditiveExpression(ctx *parser.Additive_expressionContext) {
+	children := ctx.GetChildren()
+	for i, child := range children {
+		if i > 0 && i%2 == 1 {
+			// This is an operator
+			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+		} else {
+			// This is an operand
+			v.Visit(child)
+		}
+	}
+}
+
+// visitMultiplicativeExpression visits a multiplicative expression
+func (v *ASTVisitor) visitMultiplicativeExpression(ctx *parser.Multiplicative_expressionContext) {
+	children := ctx.GetChildren()
+	for i, child := range children {
+		if i > 0 && i%2 == 1 {
+			// This is an operator
+			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+		} else {
+			// This is an operand
+			v.Visit(child)
+		}
+	}
+}
+
+// visitUnaryExpression visits a unary expression
+func (v *ASTVisitor) visitUnaryExpression(ctx *parser.Unary_expressionContext) {
+	v.visitChildren(ctx)
 }
 
 // isAssignmentOperator checks if a string is an assignment operator

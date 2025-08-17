@@ -1,0 +1,15 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_openat/pid==1234&&uid!=0/{
+    printf("Complex predicate test\n");
+}
+
+kprobe:vfs_read/retval>0/{
+    @bytes_read=@bytes_read+retval;
+    @count=@count+1;
+}
+
+END{
+    printf("Total bytes: %d\n", @bytes_read);
+    printf("Count: %d\n", @count);
+}
