@@ -70,8 +70,20 @@ func (v *ASTVisitor) Visit(tree antlr.Tree) {
 		v.visitPrintfStatement(t)
 	case *parser.ExpressionContext:
 		v.visitExpression(t)
+	case *parser.Expr_listContext:
+		v.visitExprList(t)
+	case *parser.Postfix_expressionContext:
+		v.visitPostfixExpression(t)
+	case *parser.Primary_expressionContext:
+		v.visitPrimaryExpression(t)
 	case *parser.CommentContext:
 		v.visitComment(t)
+	case antlr.TerminalNode:
+		// Handle terminal nodes (tokens) - only write non-structural tokens
+		text := t.GetText()
+		if text != "" && text != "<EOF>" && text != "{" && text != "}" && text != ";" && text != "(" && text != ")" && text != "," {
+			v.formatter.writeString(text)
+		}
 	default:
 		// For other node types, visit children
 		if t != nil {
@@ -179,21 +191,12 @@ func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
 func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 	v.formatter.writeBlockStart()
 
-	for i := 0; i < ctx.GetChildCount(); i++ {
-		child := ctx.GetChild(i)
-		if stmt, ok := child.(*parser.StatementContext); ok {
-			v.Visit(stmt)
-			v.formatter.writeString(";")
-			v.formatter.writeNewline()
-		} else if terminal, ok := child.(antlr.TerminalNode); ok {
-			// Skip braces and newlines as they're handled by writeBlockStart/End
-			text := terminal.GetText()
-			if text != "{" && text != "}" && text != "\n" {
-				v.formatter.writeString(text)
-			}
-		} else {
-			v.Visit(child)
-		}
+	// Visit all statements in the block
+	for _, stmt := range ctx.AllStatement() {
+		v.formatter.writeIndent()
+		v.Visit(stmt)
+		v.formatter.writeSemicolon()
+		v.formatter.writeNewline()
 	}
 
 	v.formatter.writeBlockEnd()
@@ -201,7 +204,11 @@ func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 
 // visitStatement visits a statement
 func (v *ASTVisitor) visitStatement(ctx *parser.StatementContext) {
-	v.visitChildren(ctx)
+	// Handle different types of statements
+	for i := 0; i < ctx.GetChildCount(); i++ {
+		child := ctx.GetChild(i)
+		v.Visit(child)
+	}
 }
 
 // visitAssignment visits an assignment
@@ -251,23 +258,21 @@ func (v *ASTVisitor) visitVarAssign(ctx *parser.Var_assignContext) {
 
 // visitFunctionCall visits a function call
 func (v *ASTVisitor) visitFunctionCall(ctx *parser.Function_callContext) {
-	for i := 0; i < ctx.GetChildCount(); i++ {
-		child := ctx.GetChild(i)
-		if terminal, ok := child.(antlr.TerminalNode); ok {
-			text := terminal.GetText()
-			if text == "(" {
-				v.formatter.writeOpenParen()
-			} else if text == ")" {
-				v.formatter.writeCloseParen()
-			} else if text == "," {
-				v.formatter.writeComma()
-			} else {
-				v.formatter.writeString(text)
-			}
-		} else {
-			v.Visit(child)
-		}
+	// Get function name
+	if ctx.Function_name() != nil {
+		v.Visit(ctx.Function_name())
+	} else if ctx.Builtin_name() != nil {
+		v.Visit(ctx.Builtin_name())
 	}
+
+	v.formatter.writeOpenParen()
+
+	// Handle arguments
+	if ctx.Expr_list() != nil {
+		v.Visit(ctx.Expr_list())
+	}
+
+	v.formatter.writeCloseParen()
 }
 
 // visitIfStatement visits an if statement
@@ -339,7 +344,27 @@ func (v *ASTVisitor) visitReturnStatement(ctx *parser.Return_statementContext) {
 // visitClearStatement visits a clear statement
 func (v *ASTVisitor) visitClearStatement(ctx *parser.Clear_statementContext) {
 	v.formatter.writeKeyword("clear")
-	v.visitChildren(ctx)
+	v.formatter.writeOpenParen()
+
+	// Handle the argument (map name or variable)
+	if ctx.MAP_NAME() != nil {
+		v.formatter.writeString(ctx.MAP_NAME().GetText())
+	} else {
+		// Handle other forms like '@' or variable
+		for i := 0; i < ctx.GetChildCount(); i++ {
+			child := ctx.GetChild(i)
+			if terminal, ok := child.(antlr.TerminalNode); ok {
+				text := terminal.GetText()
+				if text != "clear" && text != "(" && text != ")" && text != " " {
+					v.formatter.writeString(text)
+				}
+			} else {
+				v.Visit(child)
+			}
+		}
+	}
+
+	v.formatter.writeCloseParen()
 }
 
 // visitDeleteStatement visits a delete statement
@@ -372,27 +397,15 @@ func (v *ASTVisitor) visitPrintfStatement(ctx *parser.Printf_statementContext) {
 	v.formatter.writeString("printf")
 	v.formatter.writeOpenParen()
 
-	children := ctx.GetChildren()
-	first := true
-	for _, child := range children {
-		if terminal, ok := child.(antlr.TerminalNode); ok {
-			text := terminal.GetText()
-			if text == "," {
-				v.formatter.writeComma()
-			} else if text != "printf" && text != "(" && text != ")" {
-				if !first {
-					v.formatter.writeSpace()
-				}
-				v.formatter.writeString(text)
-				first = false
-			}
-		} else {
-			if !first {
-				v.formatter.writeSpace()
-			}
-			v.Visit(child)
-			first = false
-		}
+	// Handle the string argument
+	if ctx.STRING() != nil {
+		v.formatter.writeString(ctx.STRING().GetText())
+	}
+
+	// Handle additional expressions
+	for _, expr := range ctx.AllExpression() {
+		v.formatter.writeComma()
+		v.Visit(expr)
 	}
 
 	v.formatter.writeCloseParen()
@@ -400,6 +413,26 @@ func (v *ASTVisitor) visitPrintfStatement(ctx *parser.Printf_statementContext) {
 
 // visitExpression visits an expression
 func (v *ASTVisitor) visitExpression(ctx *parser.ExpressionContext) {
+	v.visitChildren(ctx)
+}
+
+// visitExprList visits an expression list
+func (v *ASTVisitor) visitExprList(ctx *parser.Expr_listContext) {
+	for i, expr := range ctx.AllExpression() {
+		if i > 0 {
+			v.formatter.writeComma()
+		}
+		v.Visit(expr)
+	}
+}
+
+// visitPostfixExpression visits a postfix expression
+func (v *ASTVisitor) visitPostfixExpression(ctx *parser.Postfix_expressionContext) {
+	v.visitChildren(ctx)
+}
+
+// visitPrimaryExpression visits a primary expression
+func (v *ASTVisitor) visitPrimaryExpression(ctx *parser.Primary_expressionContext) {
 	v.visitChildren(ctx)
 }
 

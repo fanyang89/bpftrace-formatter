@@ -204,3 +204,8 @@ func (f *ASTFormatter) writeBlockEnd() {
 	f.ensureNewline()
 	f.writeString("}")
 }
+
+// writeSemicolon writes a semicolon
+func (f *ASTFormatter) writeSemicolon() {
+	f.writeString(";")
+}
