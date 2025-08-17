@@ -1,0 +1,13 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_openat {
+    printf("openat: %s\n", str(args.filename));
+}
+
+tracepoint:syscalls:sys_enter_openat /pid == 1234/ {
+    @opens[pid] = count();
+}
+
+END {
+    clear(@opens);
+}
