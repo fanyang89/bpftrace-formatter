@@ -179,12 +179,10 @@ func (v *ASTVisitor) visitProbeDef(ctx *parser.Probe_defContext) {
 
 // visitPredicate visits a predicate
 func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
-	if v.formatter.config.Probes.AlignPredicates {
-		v.formatter.writeSpace()
-	}
-	v.formatter.writeString("/")
+	v.formatter.writeNewline()
+	v.formatter.writeString("/ ")
 	v.Visit(ctx.Expression())
-	v.formatter.writeString("/")
+	v.formatter.writeString(" /")
 }
 
 // visitBlock visits a block
