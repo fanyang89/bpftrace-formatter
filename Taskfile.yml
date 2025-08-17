@@ -6,3 +6,11 @@ tasks:
     desc: Compile bpftrace.g4 grammar file using ANTLR4
     cmds:
       - uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser bpftrace.g4
+
+  default:
+    cmds:
+      - task: build
+
+  build:
+    cmds:
+      - go build ./cmd/btfmt
