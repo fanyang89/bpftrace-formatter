@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/fanyang89/bpftrace-formatter/parser"
 )
 
@@ -287,25 +288,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Use the new ANTLR-based parser
-	bpftraceParser := parser.NewbpftraceParser(string(content))
-	_, err = bpftraceParser.Parse()
-	if err != nil {
-		fmt.Printf("Error parsing with ANTLR: %v\n", err)
-		// Fall back to the old formatter
-		oldFormatter := NewFormatter()
-		formatted := oldFormatter.Format(string(content))
-		fmt.Println(formatted)
-		return
-	}
+	// Use the ANTLR-based parser
+	input := antlr.NewInputStream(string(content))
+	lexer := parser.NewbpftraceLexer(input)
+	stream := antlr.NewCommonTokenStream(lexer, 0)
+	bpftraceParser := parser.NewbpftraceParser(stream)
 
-	// Use the new AST-based formatter
-	newFormatter := parser.NewFormatter()
-	formatted, err := newFormatter.Format(string(content))
-	if err != nil {
-		fmt.Printf("Error formatting: %v\n", err)
-		os.Exit(1)
-	}
+	// Parse the program
+	tree := bpftraceParser.Program()
+
+	// For now, use the old formatter until we implement AST-based formatting
+	// TODO: Implement AST-based formatter using the parse tree
+	_ = tree // Suppress unused variable warning
+	oldFormatter := NewFormatter()
+	formatted := oldFormatter.Format(string(content))
 
 	fmt.Println(formatted)
 }
