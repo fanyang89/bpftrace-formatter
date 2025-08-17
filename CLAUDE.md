@@ -49,7 +49,6 @@ go test -run TestName  # Run specific test function
 ### Key Processing Flow
 
 1. **Tokenization** (`main.go:73-149`):
-
    - Uses regex patterns to identify probe definitions
    - Handles shebang lines and comments
    - Supports predicate filtering syntax (`/condition/`)

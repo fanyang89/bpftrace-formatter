@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/fanyang89/bpftrace-formatter/parser"
 )
 
 // TokenType represents the type of token
@@ -285,8 +287,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	formatter := NewFormatter()
-	formatted := formatter.Format(string(content))
+	// Use the new ANTLR-based parser
+	bpftraceParser := parser.NewbpftraceParser(string(content))
+	_, err = bpftraceParser.Parse()
+	if err != nil {
+		fmt.Printf("Error parsing with ANTLR: %v\n", err)
+		// Fall back to the old formatter
+		oldFormatter := NewFormatter()
+		formatted := oldFormatter.Format(string(content))
+		fmt.Println(formatted)
+		return
+	}
+
+	// Use the new AST-based formatter
+	newFormatter := parser.NewFormatter()
+	formatted, err := newFormatter.Format(string(content))
+	if err != nil {
+		fmt.Printf("Error formatting: %v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Println(formatted)
 }
