@@ -462,12 +462,15 @@ func (v *ASTVisitor) visitComment(ctx *parser.CommentContext) {
 // visitLogicalOrExpression visits a logical OR expression
 func (v *ASTVisitor) visitLogicalOrExpression(ctx *parser.Logical_or_expressionContext) {
 	children := ctx.GetChildren()
-	for i, child := range children {
-		if i > 0 && i%2 == 1 {
-			// This is an operator
-			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "||" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
 		} else {
-			// This is an operand
 			v.Visit(child)
 		}
 	}
@@ -476,12 +479,15 @@ func (v *ASTVisitor) visitLogicalOrExpression(ctx *parser.Logical_or_expressionC
 // visitLogicalAndExpression visits a logical AND expression
 func (v *ASTVisitor) visitLogicalAndExpression(ctx *parser.Logical_and_expressionContext) {
 	children := ctx.GetChildren()
-	for i, child := range children {
-		if i > 0 && i%2 == 1 {
-			// This is an operator
-			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "&&" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
 		} else {
-			// This is an operand
 			v.Visit(child)
 		}
 	}
@@ -490,12 +496,15 @@ func (v *ASTVisitor) visitLogicalAndExpression(ctx *parser.Logical_and_expressio
 // visitEqualityExpression visits an equality expression
 func (v *ASTVisitor) visitEqualityExpression(ctx *parser.Equality_expressionContext) {
 	children := ctx.GetChildren()
-	for i, child := range children {
-		if i > 0 && i%2 == 1 {
-			// This is an operator
-			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "==" || text == "!=" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
 		} else {
-			// This is an operand
 			v.Visit(child)
 		}
 	}
@@ -504,12 +513,15 @@ func (v *ASTVisitor) visitEqualityExpression(ctx *parser.Equality_expressionCont
 // visitRelationalExpression visits a relational expression
 func (v *ASTVisitor) visitRelationalExpression(ctx *parser.Relational_expressionContext) {
 	children := ctx.GetChildren()
-	for i, child := range children {
-		if i > 0 && i%2 == 1 {
-			// This is an operator
-			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "<" || text == ">" || text == "<=" || text == ">=" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
 		} else {
-			// This is an operand
 			v.Visit(child)
 		}
 	}
@@ -518,12 +530,15 @@ func (v *ASTVisitor) visitRelationalExpression(ctx *parser.Relational_expression
 // visitShiftExpression visits a shift expression
 func (v *ASTVisitor) visitShiftExpression(ctx *parser.Shift_expressionContext) {
 	children := ctx.GetChildren()
-	for i, child := range children {
-		if i > 0 && i%2 == 1 {
-			// This is an operator
-			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "<<" || text == ">>" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
 		} else {
-			// This is an operand
 			v.Visit(child)
 		}
 	}
@@ -532,12 +547,15 @@ func (v *ASTVisitor) visitShiftExpression(ctx *parser.Shift_expressionContext) {
 // visitAdditiveExpression visits an additive expression
 func (v *ASTVisitor) visitAdditiveExpression(ctx *parser.Additive_expressionContext) {
 	children := ctx.GetChildren()
-	for i, child := range children {
-		if i > 0 && i%2 == 1 {
-			// This is an operator
-			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "+" || text == "-" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
 		} else {
-			// This is an operand
 			v.Visit(child)
 		}
 	}
@@ -546,12 +564,15 @@ func (v *ASTVisitor) visitAdditiveExpression(ctx *parser.Additive_expressionCont
 // visitMultiplicativeExpression visits a multiplicative expression
 func (v *ASTVisitor) visitMultiplicativeExpression(ctx *parser.Multiplicative_expressionContext) {
 	children := ctx.GetChildren()
-	for i, child := range children {
-		if i > 0 && i%2 == 1 {
-			// This is an operator
-			v.formatter.writeOperator(child.(antlr.TerminalNode).GetText())
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "*" || text == "/" || text == "%" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
 		} else {
-			// This is an operand
 			v.Visit(child)
 		}
 	}

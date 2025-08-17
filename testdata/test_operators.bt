@@ -1,15 +1,35 @@
 #!/usr/bin/env bpftrace
 
-tracepoint:syscalls:sys_enter_openat/pid==1234&&uid!=0/{
+tracepoint:syscalls:sys_enter_openat
+/ pid==1234 && uid!=0 /
+{
     printf("Complex predicate test\n");
 }
 
-kprobe:vfs_read/retval>0/{
-    @bytes_read=@bytes_read+retval;
-    @count=@count+1;
+kprobe:vfs_read
+/ retval>0 /
+{
+    @bytes_read[pid] = count();
+    @count[pid] = count();
 }
 
-END{
-    printf("Total bytes: %d\n", @bytes_read);
-    printf("Count: %d\n", @count);
+tracepoint:syscalls:sys_enter_write
+/ args.fd>=0 && args.fd<=1000 /
+{
+    @large_writes = count();
+}
+
+kprobe:tcp_sendmsg
+/ args.size>1024 /
+{
+    @network_ops = count();
+}
+
+END
+{
+    printf("Formatting test completed\n");
+    clear(@bytes_read);
+    clear(@count);
+    clear(@large_writes);
+    clear(@network_ops);
 }
