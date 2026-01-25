@@ -3,18 +3,26 @@ version: "3"
 
 tasks:
   compile-grammar:
-    desc: Compile bpftrace.g4 grammar file using ANTLR4
+    desc: Compile ANTLR grammar
     cmds:
       - uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser bpftrace.g4
 
-  default:
+  test:
+    desc: Run Go tests
     cmds:
-      - task: build
+      - go test ./...
+
+  test-tools:
+    desc: Run tests against bpftrace/tools
+    cmds:
+      - BPFTRACE_TOOLS_DIR=bpftrace/tools go test ./...
 
   build:
+    desc: Build the btfmt binary
     cmds:
       - go build ./cmd/btfmt
 
   fmt:
+    desc: Format Go code
     cmds:
       - go fmt ./...
