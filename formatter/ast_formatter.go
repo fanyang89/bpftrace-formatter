@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -16,6 +17,33 @@ type ASTFormatter struct {
 	indentLevel    int
 	lastWasNewline bool
 	needIndent     bool
+}
+
+type syntaxErrorListener struct {
+	*antlr.DefaultErrorListener
+	errors []error
+}
+
+func newSyntaxErrorListener() *syntaxErrorListener {
+	return &syntaxErrorListener{DefaultErrorListener: antlr.NewDefaultErrorListener()}
+}
+
+func (l *syntaxErrorListener) SyntaxError(_ antlr.Recognizer, _ interface{}, line, column int, msg string, _ antlr.RecognitionException) {
+	l.errors = append(l.errors, fmt.Errorf("line %d:%d: %s", line, column, msg))
+}
+
+func (l *syntaxErrorListener) Err() error {
+	count := len(l.errors)
+	if count == 0 {
+		return nil
+	}
+	if len(l.errors) == 0 {
+		return fmt.Errorf("parse failed with %d syntax error(s)", count)
+	}
+	if count == 1 && len(l.errors) == 1 {
+		return fmt.Errorf("parse failed: %w", l.errors[0])
+	}
+	return fmt.Errorf("parse failed with %d syntax error(s): %v", count, l.errors[0])
 }
 
 // NewASTFormatter creates a new AST-based formatter
@@ -39,11 +67,19 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 	// Create ANTLR input stream
 	inputStream := antlr.NewInputStream(input)
 	lexer := parser.NewbpftraceLexer(inputStream)
+	errorListener := newSyntaxErrorListener()
+	lexer.RemoveErrorListeners()
+	lexer.AddErrorListener(errorListener)
 	tokenStream := antlr.NewCommonTokenStream(lexer, 0)
 	bpftraceParser := parser.NewbpftraceParser(tokenStream)
+	bpftraceParser.RemoveErrorListeners()
+	bpftraceParser.AddErrorListener(errorListener)
 
 	// Parse the program
 	tree := bpftraceParser.Program()
+	if err := errorListener.Err(); err != nil {
+		return "", err
+	}
 
 	// Create and use the visitor
 	visitor := NewASTVisitor(f)

@@ -15,7 +15,7 @@ tasks:
   test-tools:
     desc: Run tests against bpftrace/tools
     cmds:
-      - BPFTRACE_TOOLS_DIR=bpftrace/tools go test ./...
+      - go test ./...
 
   build:
     desc: Build the btfmt binary

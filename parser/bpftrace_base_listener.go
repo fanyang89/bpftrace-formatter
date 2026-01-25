@@ -39,6 +39,72 @@ func (s *BasebpftraceListener) EnterContent(ctx *ContentContext) {}
 // ExitContent is called when production content is exited.
 func (s *BasebpftraceListener) ExitContent(ctx *ContentContext) {}
 
+// EnterMacro_definition is called when production macro_definition is entered.
+func (s *BasebpftraceListener) EnterMacro_definition(ctx *Macro_definitionContext) {}
+
+// ExitMacro_definition is called when production macro_definition is exited.
+func (s *BasebpftraceListener) ExitMacro_definition(ctx *Macro_definitionContext) {}
+
+// EnterMacro_params is called when production macro_params is entered.
+func (s *BasebpftraceListener) EnterMacro_params(ctx *Macro_paramsContext) {}
+
+// ExitMacro_params is called when production macro_params is exited.
+func (s *BasebpftraceListener) ExitMacro_params(ctx *Macro_paramsContext) {}
+
+// EnterMacro_param is called when production macro_param is entered.
+func (s *BasebpftraceListener) EnterMacro_param(ctx *Macro_paramContext) {}
+
+// ExitMacro_param is called when production macro_param is exited.
+func (s *BasebpftraceListener) ExitMacro_param(ctx *Macro_paramContext) {}
+
+// EnterPreprocessor_block is called when production preprocessor_block is entered.
+func (s *BasebpftraceListener) EnterPreprocessor_block(ctx *Preprocessor_blockContext) {}
+
+// ExitPreprocessor_block is called when production preprocessor_block is exited.
+func (s *BasebpftraceListener) ExitPreprocessor_block(ctx *Preprocessor_blockContext) {}
+
+// EnterPreprocessor_line is called when production preprocessor_line is entered.
+func (s *BasebpftraceListener) EnterPreprocessor_line(ctx *Preprocessor_lineContext) {}
+
+// ExitPreprocessor_line is called when production preprocessor_line is exited.
+func (s *BasebpftraceListener) ExitPreprocessor_line(ctx *Preprocessor_lineContext) {}
+
+// EnterConfig_preamble is called when production config_preamble is entered.
+func (s *BasebpftraceListener) EnterConfig_preamble(ctx *Config_preambleContext) {}
+
+// ExitConfig_preamble is called when production config_preamble is exited.
+func (s *BasebpftraceListener) ExitConfig_preamble(ctx *Config_preambleContext) {}
+
+// EnterConfig_section is called when production config_section is entered.
+func (s *BasebpftraceListener) EnterConfig_section(ctx *Config_sectionContext) {}
+
+// ExitConfig_section is called when production config_section is exited.
+func (s *BasebpftraceListener) ExitConfig_section(ctx *Config_sectionContext) {}
+
+// EnterConfig_block is called when production config_block is entered.
+func (s *BasebpftraceListener) EnterConfig_block(ctx *Config_blockContext) {}
+
+// ExitConfig_block is called when production config_block is exited.
+func (s *BasebpftraceListener) ExitConfig_block(ctx *Config_blockContext) {}
+
+// EnterConfig_statement is called when production config_statement is entered.
+func (s *BasebpftraceListener) EnterConfig_statement(ctx *Config_statementContext) {}
+
+// ExitConfig_statement is called when production config_statement is exited.
+func (s *BasebpftraceListener) ExitConfig_statement(ctx *Config_statementContext) {}
+
+// EnterConfig_assignment is called when production config_assignment is entered.
+func (s *BasebpftraceListener) EnterConfig_assignment(ctx *Config_assignmentContext) {}
+
+// ExitConfig_assignment is called when production config_assignment is exited.
+func (s *BasebpftraceListener) ExitConfig_assignment(ctx *Config_assignmentContext) {}
+
+// EnterConfig_value is called when production config_value is entered.
+func (s *BasebpftraceListener) EnterConfig_value(ctx *Config_valueContext) {}
+
+// ExitConfig_value is called when production config_value is exited.
+func (s *BasebpftraceListener) ExitConfig_value(ctx *Config_valueContext) {}
+
 // EnterShebang is called when production shebang is entered.
 func (s *BasebpftraceListener) EnterShebang(ctx *ShebangContext) {}
 
@@ -51,11 +117,35 @@ func (s *BasebpftraceListener) EnterProbe(ctx *ProbeContext) {}
 // ExitProbe is called when production probe is exited.
 func (s *BasebpftraceListener) ExitProbe(ctx *ProbeContext) {}
 
+// EnterProbe_list is called when production probe_list is entered.
+func (s *BasebpftraceListener) EnterProbe_list(ctx *Probe_listContext) {}
+
+// ExitProbe_list is called when production probe_list is exited.
+func (s *BasebpftraceListener) ExitProbe_list(ctx *Probe_listContext) {}
+
 // EnterProbe_def is called when production probe_def is entered.
 func (s *BasebpftraceListener) EnterProbe_def(ctx *Probe_defContext) {}
 
 // ExitProbe_def is called when production probe_def is exited.
 func (s *BasebpftraceListener) ExitProbe_def(ctx *Probe_defContext) {}
+
+// EnterProbe_target is called when production probe_target is entered.
+func (s *BasebpftraceListener) EnterProbe_target(ctx *Probe_targetContext) {}
+
+// ExitProbe_target is called when production probe_target is exited.
+func (s *BasebpftraceListener) ExitProbe_target(ctx *Probe_targetContext) {}
+
+// EnterPath is called when production path is entered.
+func (s *BasebpftraceListener) EnterPath(ctx *PathContext) {}
+
+// ExitPath is called when production path is exited.
+func (s *BasebpftraceListener) ExitPath(ctx *PathContext) {}
+
+// EnterPath_segment is called when production path_segment is entered.
+func (s *BasebpftraceListener) EnterPath_segment(ctx *Path_segmentContext) {}
+
+// ExitPath_segment is called when production path_segment is exited.
+func (s *BasebpftraceListener) ExitPath_segment(ctx *Path_segmentContext) {}
 
 // EnterPredicate is called when production predicate is entered.
 func (s *BasebpftraceListener) EnterPredicate(ctx *PredicateContext) {}
@@ -104,6 +194,12 @@ func (s *BasebpftraceListener) EnterIf_statement(ctx *If_statementContext) {}
 
 // ExitIf_statement is called when production if_statement is exited.
 func (s *BasebpftraceListener) ExitIf_statement(ctx *If_statementContext) {}
+
+// EnterIf_condition is called when production if_condition is entered.
+func (s *BasebpftraceListener) EnterIf_condition(ctx *If_conditionContext) {}
+
+// ExitIf_condition is called when production if_condition is exited.
+func (s *BasebpftraceListener) ExitIf_condition(ctx *If_conditionContext) {}
 
 // EnterWhile_statement is called when production while_statement is entered.
 func (s *BasebpftraceListener) EnterWhile_statement(ctx *While_statementContext) {}
@@ -159,6 +255,12 @@ func (s *BasebpftraceListener) EnterExpression(ctx *ExpressionContext) {}
 // ExitExpression is called when production expression is exited.
 func (s *BasebpftraceListener) ExitExpression(ctx *ExpressionContext) {}
 
+// EnterConditional_expression is called when production conditional_expression is entered.
+func (s *BasebpftraceListener) EnterConditional_expression(ctx *Conditional_expressionContext) {}
+
+// ExitConditional_expression is called when production conditional_expression is exited.
+func (s *BasebpftraceListener) ExitConditional_expression(ctx *Conditional_expressionContext) {}
+
 // EnterLogical_or_expression is called when production logical_or_expression is entered.
 func (s *BasebpftraceListener) EnterLogical_or_expression(ctx *Logical_or_expressionContext) {}
 
@@ -170,6 +272,24 @@ func (s *BasebpftraceListener) EnterLogical_and_expression(ctx *Logical_and_expr
 
 // ExitLogical_and_expression is called when production logical_and_expression is exited.
 func (s *BasebpftraceListener) ExitLogical_and_expression(ctx *Logical_and_expressionContext) {}
+
+// EnterBitwise_or_expression is called when production bitwise_or_expression is entered.
+func (s *BasebpftraceListener) EnterBitwise_or_expression(ctx *Bitwise_or_expressionContext) {}
+
+// ExitBitwise_or_expression is called when production bitwise_or_expression is exited.
+func (s *BasebpftraceListener) ExitBitwise_or_expression(ctx *Bitwise_or_expressionContext) {}
+
+// EnterBitwise_xor_expression is called when production bitwise_xor_expression is entered.
+func (s *BasebpftraceListener) EnterBitwise_xor_expression(ctx *Bitwise_xor_expressionContext) {}
+
+// ExitBitwise_xor_expression is called when production bitwise_xor_expression is exited.
+func (s *BasebpftraceListener) ExitBitwise_xor_expression(ctx *Bitwise_xor_expressionContext) {}
+
+// EnterBitwise_and_expression is called when production bitwise_and_expression is entered.
+func (s *BasebpftraceListener) EnterBitwise_and_expression(ctx *Bitwise_and_expressionContext) {}
+
+// ExitBitwise_and_expression is called when production bitwise_and_expression is exited.
+func (s *BasebpftraceListener) ExitBitwise_and_expression(ctx *Bitwise_and_expressionContext) {}
 
 // EnterEquality_expression is called when production equality_expression is entered.
 func (s *BasebpftraceListener) EnterEquality_expression(ctx *Equality_expressionContext) {}
@@ -208,17 +328,53 @@ func (s *BasebpftraceListener) EnterUnary_expression(ctx *Unary_expressionContex
 // ExitUnary_expression is called when production unary_expression is exited.
 func (s *BasebpftraceListener) ExitUnary_expression(ctx *Unary_expressionContext) {}
 
+// EnterCast_expression is called when production cast_expression is entered.
+func (s *BasebpftraceListener) EnterCast_expression(ctx *Cast_expressionContext) {}
+
+// ExitCast_expression is called when production cast_expression is exited.
+func (s *BasebpftraceListener) ExitCast_expression(ctx *Cast_expressionContext) {}
+
+// EnterType_name is called when production type_name is entered.
+func (s *BasebpftraceListener) EnterType_name(ctx *Type_nameContext) {}
+
+// ExitType_name is called when production type_name is exited.
+func (s *BasebpftraceListener) ExitType_name(ctx *Type_nameContext) {}
+
+// EnterPointer is called when production pointer is entered.
+func (s *BasebpftraceListener) EnterPointer(ctx *PointerContext) {}
+
+// ExitPointer is called when production pointer is exited.
+func (s *BasebpftraceListener) ExitPointer(ctx *PointerContext) {}
+
 // EnterPostfix_expression is called when production postfix_expression is entered.
 func (s *BasebpftraceListener) EnterPostfix_expression(ctx *Postfix_expressionContext) {}
 
 // ExitPostfix_expression is called when production postfix_expression is exited.
 func (s *BasebpftraceListener) ExitPostfix_expression(ctx *Postfix_expressionContext) {}
 
+// EnterField_name is called when production field_name is entered.
+func (s *BasebpftraceListener) EnterField_name(ctx *Field_nameContext) {}
+
+// ExitField_name is called when production field_name is exited.
+func (s *BasebpftraceListener) ExitField_name(ctx *Field_nameContext) {}
+
 // EnterPrimary_expression is called when production primary_expression is entered.
 func (s *BasebpftraceListener) EnterPrimary_expression(ctx *Primary_expressionContext) {}
 
 // ExitPrimary_expression is called when production primary_expression is exited.
 func (s *BasebpftraceListener) ExitPrimary_expression(ctx *Primary_expressionContext) {}
+
+// EnterAnonymous_map is called when production anonymous_map is entered.
+func (s *BasebpftraceListener) EnterAnonymous_map(ctx *Anonymous_mapContext) {}
+
+// ExitAnonymous_map is called when production anonymous_map is exited.
+func (s *BasebpftraceListener) ExitAnonymous_map(ctx *Anonymous_mapContext) {}
+
+// EnterTuple_expression is called when production tuple_expression is entered.
+func (s *BasebpftraceListener) EnterTuple_expression(ctx *Tuple_expressionContext) {}
+
+// ExitTuple_expression is called when production tuple_expression is exited.
+func (s *BasebpftraceListener) ExitTuple_expression(ctx *Tuple_expressionContext) {}
 
 // EnterVariable is called when production variable is entered.
 func (s *BasebpftraceListener) EnterVariable(ctx *VariableContext) {}
