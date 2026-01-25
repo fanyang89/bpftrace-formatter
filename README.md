@@ -1,46 +1,63 @@
 # BPFTrace Formatter
 
-A Go-based formatter for bpftrace scripts built on ANTLR4.
+A Go tool for formatting bpftrace scripts using an ANTLR-generated parser and an AST visitor.
 
 ## Features
 
 - Grammar-based parsing and formatting for bpftrace scripts
-- Configurable indentation, spacing, line breaks, comments, probes, and blocks
-- Preserves shebangs and comments
-- Supports formatting multiple files and in-place edits
+- Consistent indentation, spacing, and line breaks
+- Preserves comments and shebangs
+- Configurable formatting options via JSON
+- CLI supports formatting multiple files and in-place edits
 
 ## Build
 
+### From source
+
 ```bash
 go mod tidy
-task build
-# or
 go build ./cmd/btfmt
+```
+
+### Taskfile
+
+```bash
+task build
 ```
 
 ## Usage
 
-### Basic
+### Basic usage
 
 ```bash
 ./btfmt <file.bt>
 ```
 
-### In-place / write
+### Format in place
 
 ```bash
-./btfmt -i <file.bt>
-./btfmt -w <file1.bt> <file2.bt>
+./btfmt -i script.bt
 ```
 
-### Configuration
+### Format multiple files
+
+```bash
+./btfmt -w file1.bt file2.bt
+```
+
+### Generate a default configuration
 
 ```bash
 ./btfmt -generate-config
-./btfmt -config <path/to/.btfmt.json> <file.bt>
 ```
 
-Options:
+### Use a custom configuration
+
+```bash
+./btfmt -config .btfmt.json script.bt
+```
+
+### Options
 
 - `-c`, `-config <file>`: Path to configuration file
 - `-i`: Edit files in place
@@ -50,7 +67,35 @@ Options:
 - `-config-output <file>`: Output path for generated config (default: .btfmt.json)
 - `-help`: Show help message
 
-### Example
+## Configuration
+
+The formatter loads configuration in the following order:
+
+1. File specified with `-config`
+2. `.btfmt.json` in the current directory or parent directories
+3. `~/.btfmt.json`
+4. Built-in defaults
+
+A minimal example configuration:
+
+```json
+{
+  "indent": {
+    "size": 4,
+    "use_spaces": true
+  },
+  "line_breaks": {
+    "empty_lines_between_probes": 1
+  }
+}
+```
+
+Configuration is JSON with these top-level sections: `indent`, `spacing`,
+`line_breaks`, `comments`, `probes`, `blocks`.
+
+Run `./btfmt -generate-config` to generate a full default configuration file.
+
+## Example
 
 Input file (`testdata/test_input.bt`):
 
@@ -78,35 +123,12 @@ tracepoint:syscalls:sys_enter_openat/pid==1234/ {
 }
 ```
 
-## Configuration
-
-The formatter loads configuration in this order:
-
-1. File specified with `-config`
-2. `.btfmt.json` in the current directory or parent directories
-3. `~/.btfmt.json` in the home directory
-4. Built-in defaults
-
-Configuration is JSON with these top-level sections: `indent`, `spacing`,
-`line_breaks`, `comments`, `probes`, `blocks`.
-
-Example:
-
-```json
-{
-  "indent": { "size": 4, "use_spaces": true },
-  "spacing": { "around_operators": true, "around_commas": true },
-  "line_breaks": { "empty_lines_between_probes": 1, "max_line_length": 80 },
-  "comments": { "preserve_inline": true },
-  "probes": { "sort_probes": false },
-  "blocks": { "brace_style": "next_line" }
-}
-```
-
 ## Grammar Compilation
 
 ```bash
 task compile-grammar
+# or
+uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser bpftrace.g4
 ```
 
 ## Testing
@@ -119,12 +141,12 @@ go test ./...
 
 ## Project Structure
 
-- `cmd/btfmt/`: CLI entrypoint
+- `cmd/btfmt/`: CLI entry point and tests
 - `formatter/`: AST formatter and visitor
-- `config/`: Configuration types and loader
-- `parser/`: Generated ANTLR parser/lexer
-- `bpftrace.g4`: Grammar definition
-- `testdata/`: Test scripts and fixtures
+- `config/`: configuration types and loader
+- `parser/`: generated ANTLR parser/lexer (do not edit by hand)
+- `bpftrace.g4`: grammar definition
+- `testdata/`: input fixtures and golden output
 
 ## Supported Syntax Features
 
@@ -133,6 +155,11 @@ go test ./...
 - Expressions (logical, arithmetic, relational, unary)
 - Built-in functions and maps
 - Comments and shebang handling
+
+## Limitations
+
+- Some edge-case bpftrace syntax may need further polishing
+- Complex multi-line blocks may still require manual review
 
 ## Development
 
