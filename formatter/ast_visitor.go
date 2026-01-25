@@ -280,6 +280,8 @@ func (v *ASTVisitor) visitConfigBlock(ctx *parser.Config_blockContext) {
 			v.formatter.writeNewline()
 		case *parser.CommentContext:
 			v.Visit(node)
+		case *parser.Preprocessor_lineContext:
+			v.Visit(node)
 		}
 	}
 
@@ -491,6 +493,7 @@ func (v *ASTVisitor) visitWhileStatement(ctx *parser.While_statementContext) {
 func (v *ASTVisitor) visitForStatement(ctx *parser.For_statementContext) {
 	v.formatter.writeKeyword("for")
 	if ctx.RANGE() != nil && ctx.Variable() != nil {
+		v.formatter.writeSpace()
 		v.formatter.writeString(ctx.Variable().GetText())
 		v.formatter.writeSpace()
 		v.formatter.writeString(":")
