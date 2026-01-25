@@ -380,6 +380,8 @@ func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 			v.formatter.writeNewline()
 		case *parser.CommentContext:
 			v.Visit(node)
+		case *parser.Preprocessor_lineContext:
+			v.Visit(node)
 		}
 	}
 
