@@ -92,7 +92,7 @@ path
     ;
 
 path_segment
-    : IDENTIFIER
+    : (IDENTIFIER | NUMBER | INCR | '.' | '-' | '+')+
     ;
 
 predicate
