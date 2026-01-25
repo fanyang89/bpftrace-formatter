@@ -38,7 +38,7 @@ preprocessor_line
     ;
 
 config_preamble
-    : (comment | NEWLINE)* config_section (comment | NEWLINE)*
+    : (comment | preprocessor_line | NEWLINE)* config_section (comment | preprocessor_line | NEWLINE)*
     ;
 
 config_section
