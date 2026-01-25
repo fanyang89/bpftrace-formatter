@@ -17,14 +17,59 @@ type bpftraceListener interface {
 	// EnterContent is called when entering the content production.
 	EnterContent(c *ContentContext)
 
+	// EnterMacro_definition is called when entering the macro_definition production.
+	EnterMacro_definition(c *Macro_definitionContext)
+
+	// EnterMacro_params is called when entering the macro_params production.
+	EnterMacro_params(c *Macro_paramsContext)
+
+	// EnterMacro_param is called when entering the macro_param production.
+	EnterMacro_param(c *Macro_paramContext)
+
+	// EnterPreprocessor_block is called when entering the preprocessor_block production.
+	EnterPreprocessor_block(c *Preprocessor_blockContext)
+
+	// EnterPreprocessor_line is called when entering the preprocessor_line production.
+	EnterPreprocessor_line(c *Preprocessor_lineContext)
+
+	// EnterConfig_preamble is called when entering the config_preamble production.
+	EnterConfig_preamble(c *Config_preambleContext)
+
+	// EnterConfig_section is called when entering the config_section production.
+	EnterConfig_section(c *Config_sectionContext)
+
+	// EnterConfig_block is called when entering the config_block production.
+	EnterConfig_block(c *Config_blockContext)
+
+	// EnterConfig_statement is called when entering the config_statement production.
+	EnterConfig_statement(c *Config_statementContext)
+
+	// EnterConfig_assignment is called when entering the config_assignment production.
+	EnterConfig_assignment(c *Config_assignmentContext)
+
+	// EnterConfig_value is called when entering the config_value production.
+	EnterConfig_value(c *Config_valueContext)
+
 	// EnterShebang is called when entering the shebang production.
 	EnterShebang(c *ShebangContext)
 
 	// EnterProbe is called when entering the probe production.
 	EnterProbe(c *ProbeContext)
 
+	// EnterProbe_list is called when entering the probe_list production.
+	EnterProbe_list(c *Probe_listContext)
+
 	// EnterProbe_def is called when entering the probe_def production.
 	EnterProbe_def(c *Probe_defContext)
+
+	// EnterProbe_target is called when entering the probe_target production.
+	EnterProbe_target(c *Probe_targetContext)
+
+	// EnterPath is called when entering the path production.
+	EnterPath(c *PathContext)
+
+	// EnterPath_segment is called when entering the path_segment production.
+	EnterPath_segment(c *Path_segmentContext)
 
 	// EnterPredicate is called when entering the predicate production.
 	EnterPredicate(c *PredicateContext)
@@ -49,6 +94,9 @@ type bpftraceListener interface {
 
 	// EnterIf_statement is called when entering the if_statement production.
 	EnterIf_statement(c *If_statementContext)
+
+	// EnterIf_condition is called when entering the if_condition production.
+	EnterIf_condition(c *If_conditionContext)
 
 	// EnterWhile_statement is called when entering the while_statement production.
 	EnterWhile_statement(c *While_statementContext)
@@ -77,11 +125,23 @@ type bpftraceListener interface {
 	// EnterExpression is called when entering the expression production.
 	EnterExpression(c *ExpressionContext)
 
+	// EnterConditional_expression is called when entering the conditional_expression production.
+	EnterConditional_expression(c *Conditional_expressionContext)
+
 	// EnterLogical_or_expression is called when entering the logical_or_expression production.
 	EnterLogical_or_expression(c *Logical_or_expressionContext)
 
 	// EnterLogical_and_expression is called when entering the logical_and_expression production.
 	EnterLogical_and_expression(c *Logical_and_expressionContext)
+
+	// EnterBitwise_or_expression is called when entering the bitwise_or_expression production.
+	EnterBitwise_or_expression(c *Bitwise_or_expressionContext)
+
+	// EnterBitwise_xor_expression is called when entering the bitwise_xor_expression production.
+	EnterBitwise_xor_expression(c *Bitwise_xor_expressionContext)
+
+	// EnterBitwise_and_expression is called when entering the bitwise_and_expression production.
+	EnterBitwise_and_expression(c *Bitwise_and_expressionContext)
 
 	// EnterEquality_expression is called when entering the equality_expression production.
 	EnterEquality_expression(c *Equality_expressionContext)
@@ -101,11 +161,29 @@ type bpftraceListener interface {
 	// EnterUnary_expression is called when entering the unary_expression production.
 	EnterUnary_expression(c *Unary_expressionContext)
 
+	// EnterCast_expression is called when entering the cast_expression production.
+	EnterCast_expression(c *Cast_expressionContext)
+
+	// EnterType_name is called when entering the type_name production.
+	EnterType_name(c *Type_nameContext)
+
+	// EnterPointer is called when entering the pointer production.
+	EnterPointer(c *PointerContext)
+
 	// EnterPostfix_expression is called when entering the postfix_expression production.
 	EnterPostfix_expression(c *Postfix_expressionContext)
 
+	// EnterField_name is called when entering the field_name production.
+	EnterField_name(c *Field_nameContext)
+
 	// EnterPrimary_expression is called when entering the primary_expression production.
 	EnterPrimary_expression(c *Primary_expressionContext)
+
+	// EnterAnonymous_map is called when entering the anonymous_map production.
+	EnterAnonymous_map(c *Anonymous_mapContext)
+
+	// EnterTuple_expression is called when entering the tuple_expression production.
+	EnterTuple_expression(c *Tuple_expressionContext)
 
 	// EnterVariable is called when entering the variable production.
 	EnterVariable(c *VariableContext)
@@ -140,14 +218,59 @@ type bpftraceListener interface {
 	// ExitContent is called when exiting the content production.
 	ExitContent(c *ContentContext)
 
+	// ExitMacro_definition is called when exiting the macro_definition production.
+	ExitMacro_definition(c *Macro_definitionContext)
+
+	// ExitMacro_params is called when exiting the macro_params production.
+	ExitMacro_params(c *Macro_paramsContext)
+
+	// ExitMacro_param is called when exiting the macro_param production.
+	ExitMacro_param(c *Macro_paramContext)
+
+	// ExitPreprocessor_block is called when exiting the preprocessor_block production.
+	ExitPreprocessor_block(c *Preprocessor_blockContext)
+
+	// ExitPreprocessor_line is called when exiting the preprocessor_line production.
+	ExitPreprocessor_line(c *Preprocessor_lineContext)
+
+	// ExitConfig_preamble is called when exiting the config_preamble production.
+	ExitConfig_preamble(c *Config_preambleContext)
+
+	// ExitConfig_section is called when exiting the config_section production.
+	ExitConfig_section(c *Config_sectionContext)
+
+	// ExitConfig_block is called when exiting the config_block production.
+	ExitConfig_block(c *Config_blockContext)
+
+	// ExitConfig_statement is called when exiting the config_statement production.
+	ExitConfig_statement(c *Config_statementContext)
+
+	// ExitConfig_assignment is called when exiting the config_assignment production.
+	ExitConfig_assignment(c *Config_assignmentContext)
+
+	// ExitConfig_value is called when exiting the config_value production.
+	ExitConfig_value(c *Config_valueContext)
+
 	// ExitShebang is called when exiting the shebang production.
 	ExitShebang(c *ShebangContext)
 
 	// ExitProbe is called when exiting the probe production.
 	ExitProbe(c *ProbeContext)
 
+	// ExitProbe_list is called when exiting the probe_list production.
+	ExitProbe_list(c *Probe_listContext)
+
 	// ExitProbe_def is called when exiting the probe_def production.
 	ExitProbe_def(c *Probe_defContext)
+
+	// ExitProbe_target is called when exiting the probe_target production.
+	ExitProbe_target(c *Probe_targetContext)
+
+	// ExitPath is called when exiting the path production.
+	ExitPath(c *PathContext)
+
+	// ExitPath_segment is called when exiting the path_segment production.
+	ExitPath_segment(c *Path_segmentContext)
 
 	// ExitPredicate is called when exiting the predicate production.
 	ExitPredicate(c *PredicateContext)
@@ -172,6 +295,9 @@ type bpftraceListener interface {
 
 	// ExitIf_statement is called when exiting the if_statement production.
 	ExitIf_statement(c *If_statementContext)
+
+	// ExitIf_condition is called when exiting the if_condition production.
+	ExitIf_condition(c *If_conditionContext)
 
 	// ExitWhile_statement is called when exiting the while_statement production.
 	ExitWhile_statement(c *While_statementContext)
@@ -200,11 +326,23 @@ type bpftraceListener interface {
 	// ExitExpression is called when exiting the expression production.
 	ExitExpression(c *ExpressionContext)
 
+	// ExitConditional_expression is called when exiting the conditional_expression production.
+	ExitConditional_expression(c *Conditional_expressionContext)
+
 	// ExitLogical_or_expression is called when exiting the logical_or_expression production.
 	ExitLogical_or_expression(c *Logical_or_expressionContext)
 
 	// ExitLogical_and_expression is called when exiting the logical_and_expression production.
 	ExitLogical_and_expression(c *Logical_and_expressionContext)
+
+	// ExitBitwise_or_expression is called when exiting the bitwise_or_expression production.
+	ExitBitwise_or_expression(c *Bitwise_or_expressionContext)
+
+	// ExitBitwise_xor_expression is called when exiting the bitwise_xor_expression production.
+	ExitBitwise_xor_expression(c *Bitwise_xor_expressionContext)
+
+	// ExitBitwise_and_expression is called when exiting the bitwise_and_expression production.
+	ExitBitwise_and_expression(c *Bitwise_and_expressionContext)
 
 	// ExitEquality_expression is called when exiting the equality_expression production.
 	ExitEquality_expression(c *Equality_expressionContext)
@@ -224,11 +362,29 @@ type bpftraceListener interface {
 	// ExitUnary_expression is called when exiting the unary_expression production.
 	ExitUnary_expression(c *Unary_expressionContext)
 
+	// ExitCast_expression is called when exiting the cast_expression production.
+	ExitCast_expression(c *Cast_expressionContext)
+
+	// ExitType_name is called when exiting the type_name production.
+	ExitType_name(c *Type_nameContext)
+
+	// ExitPointer is called when exiting the pointer production.
+	ExitPointer(c *PointerContext)
+
 	// ExitPostfix_expression is called when exiting the postfix_expression production.
 	ExitPostfix_expression(c *Postfix_expressionContext)
 
+	// ExitField_name is called when exiting the field_name production.
+	ExitField_name(c *Field_nameContext)
+
 	// ExitPrimary_expression is called when exiting the primary_expression production.
 	ExitPrimary_expression(c *Primary_expressionContext)
+
+	// ExitAnonymous_map is called when exiting the anonymous_map production.
+	ExitAnonymous_map(c *Anonymous_mapContext)
+
+	// ExitTuple_expression is called when exiting the tuple_expression production.
+	ExitTuple_expression(c *Tuple_expressionContext)
 
 	// ExitVariable is called when exiting the variable production.
 	ExitVariable(c *VariableContext)

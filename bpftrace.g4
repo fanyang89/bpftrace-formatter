@@ -4,7 +4,7 @@
 grammar bpftrace;
 
 program
-    : shebang_section? content EOF
+    : shebang_section? config_preamble? content EOF
     ;
 
 shebang_section
@@ -12,7 +12,55 @@ shebang_section
     ;
 
 content
-    : (probe | comment | NEWLINE)*
+    : (probe | macro_definition | comment | preprocessor_block | preprocessor_line | NEWLINE)*
+    ;
+
+macro_definition
+    : MACRO IDENTIFIER '(' macro_params? ')' block
+    ;
+
+macro_params
+    : macro_param (',' macro_param)*
+    ;
+
+macro_param
+    : IDENTIFIER
+    | MAP_NAME
+    | VARIABLE
+    ;
+
+preprocessor_block
+    : PREPROCESSOR_BLOCK
+    ;
+
+preprocessor_line
+    : PREPROCESSOR_LINE
+    ;
+
+config_preamble
+    : (comment | NEWLINE)* config_section (comment | NEWLINE)*
+    ;
+
+config_section
+    : CONFIG '=' config_block
+    ;
+
+config_block
+    : '{' NEWLINE* ((config_statement (NEWLINE* | ';')) | (comment NEWLINE*) | (preprocessor_line NEWLINE*))* '}'
+    ;
+
+config_statement
+    : config_assignment
+    ;
+
+config_assignment
+    : IDENTIFIER '=' config_value
+    ;
+
+config_value
+    : IDENTIFIER
+    | NUMBER
+    | string
     ;
 
 shebang
@@ -20,12 +68,31 @@ shebang
     ;
 
 probe
-    : probe_def predicate? block
+    : probe_list predicate? block
     | END block
     ;
 
+probe_list
+    : probe_def (',' probe_def)*
+    ;
+
 probe_def
-    : PROBE_TYPE (':' (IDENTIFIER | NUMBER))* ('*')?
+    : PROBE_TYPE (':' probe_target)* ('*')?
+    ;
+
+probe_target
+    : IDENTIFIER ('.' IDENTIFIER)* ('.' '*')?
+    | NUMBER
+    | DURATION
+    | path
+    ;
+
+path
+    : '/' path_segment ('/' path_segment)*
+    ;
+
+path_segment
+    : IDENTIFIER
     ;
 
 predicate
@@ -33,7 +100,7 @@ predicate
     ;
 
 block
-    : '{' NEWLINE* (statement (NEWLINE* | ';'))* '}'
+    : '{' NEWLINE* ((statement (NEWLINE* | ';')) | (comment NEWLINE*) | (preprocessor_line NEWLINE*))* '}'
     ;
 
 statement
@@ -59,8 +126,10 @@ assignment
 map_assign
     : MAP_NAME '=' expression
     | MAP_NAME ('+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' | '<<=' | '>>=') expression
-    | '@' ('[' expression (',' expression)* ']')? '=' expression
-    | '@' ('[' expression (',' expression)* ']')? ('+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' | '<<=' | '>>=') expression
+    | map_access '=' expression
+    | map_access ('+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' | '<<=' | '>>=') expression
+    | '@' '=' expression
+    | '@' ('+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' | '<<=' | '>>=') expression
     ;
 
 var_assign
@@ -74,7 +143,12 @@ function_call
     ;
 
 if_statement
-    : IF '(' expression ')' block (ELSE block)?
+    : IF if_condition block (ELSE block)?
+    ;
+
+if_condition
+    : '(' expression ')'
+    | expression
     ;
 
 while_statement
@@ -84,6 +158,7 @@ while_statement
 for_statement
     : FOR '(' VARIABLE IN MAP_NAME ')' block
     | FOR '(' assignment? ';' expression? ';' assignment? ')' block
+    | FOR variable ':' expression RANGE expression block
     ;
 
 return_statement
@@ -114,7 +189,11 @@ printf_statement
     ;
 
 expression
-    : logical_or_expression
+    : conditional_expression
+    ;
+
+conditional_expression
+    : logical_or_expression ('?' expression ':' conditional_expression)?
     ;
 
 logical_or_expression
@@ -122,7 +201,19 @@ logical_or_expression
     ;
 
 logical_and_expression
-    : equality_expression (AND equality_expression)*
+    : bitwise_or_expression (AND bitwise_or_expression)*
+    ;
+
+bitwise_or_expression
+    : bitwise_xor_expression ('|' bitwise_xor_expression)*
+    ;
+
+bitwise_xor_expression
+    : bitwise_and_expression ('^' bitwise_and_expression)*
+    ;
+
+bitwise_and_expression
+    : equality_expression ('&' equality_expression)*
     ;
 
 equality_expression
@@ -146,23 +237,53 @@ multiplicative_expression
     ;
 
 unary_expression
-    : ('+' | '-' | '!' | '~') unary_expression
+    : ('+' | '-' | '!' | '~' | '*' | '&') unary_expression
     | ('++' | '--') variable
+    | cast_expression
     | postfix_expression
     ;
 
+cast_expression
+    : '(' type_name ')' unary_expression
+    ;
+
+type_name
+    : STRUCT? IDENTIFIER pointer?
+    ;
+
+pointer
+    : '*' pointer?
+    ;
+
 postfix_expression
-    : primary_expression (('++' | '--') | '[' expression (',' expression)* ']' | '(' expr_list? ')' | '.' IDENTIFIER | '->' IDENTIFIER)*
+    : primary_expression (('++' | '--') | '[' expression (',' expression)* ']' | '(' expr_list? ')' | '.' field_name | '->' field_name)*
+    ;
+
+field_name
+    : IDENTIFIER
+    | builtin_name
     ;
 
 primary_expression
     : NUMBER
     | string
     | variable
+    | MAP_NAME
     | map_access
+    | anonymous_map
+    | tuple_expression
+    | type_name
     | '(' expression ')'
     | function_call
     | builtin_name
+    ;
+
+anonymous_map
+    : '@'
+    ;
+
+tuple_expression
+    : '(' expression (',' expression)+ ')'
     ;
 
 variable
@@ -172,7 +293,7 @@ variable
 
 map_access
     : MAP_NAME '[' expression (',' expression)* ']'
-    | '@' ('[' expression (',' expression)* ']')?
+    | '@' '[' expression (',' expression)* ']'
     ;
 
 expr_list
@@ -259,7 +380,14 @@ SHEBANG
 
 COMMENT
     : '//' ~[\r\n]*
-    | '#' ~[\r\n]*
+    ;
+
+PREPROCESSOR_BLOCK
+    : '#ifndef' (.|'\r'|'\n')*? '#endif'
+    ;
+
+PREPROCESSOR_LINE
+    : '#' ~[\r\n]*
     ;
 
 WS
@@ -336,6 +464,18 @@ END
     : 'END'
     ;
 
+CONFIG
+    : 'config'
+    ;
+
+STRUCT
+    : 'struct'
+    ;
+
+MACRO
+    : 'macro'
+    ;
+
 // Operators
 EQ
     : '=='
@@ -375,6 +515,10 @@ SHL
 
 SHR
     : '>>'
+    ;
+
+RANGE
+    : '..'
     ;
 
 ARROW
@@ -432,6 +576,10 @@ DECR
     ;
 
 // Literals
+DURATION
+    : [0-9]+ ('ns' | 'us' | 'ms' | 's' | 'm' | 'h')
+    ;
+
 NUMBER
     : DECIMAL_NUMBER
     | HEX_NUMBER
@@ -470,6 +618,5 @@ VARIABLE
     ;
 
 MAP_NAME
-    : '@' [a-zA-Z_][a-zA-Z0-9_]* ('[' ~[\]]* ']')?
-    | [a-zA-Z_][a-zA-Z0-9_]* ('[' ~[\]]* ']')?
+    : '@' [a-zA-Z_][a-zA-Z0-9_]*
     ;

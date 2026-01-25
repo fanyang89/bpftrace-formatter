@@ -1,6 +1,8 @@
 package formatter
 
 import (
+	"slices"
+
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/fanyang89/bpftrace-formatter/parser"
 )
@@ -30,10 +32,34 @@ func (v *ASTVisitor) Visit(tree antlr.Tree) {
 		v.visitShebangSection(t)
 	case *parser.ContentContext:
 		v.visitContent(t)
+	case *parser.Macro_definitionContext:
+		v.visitMacroDefinition(t)
+	case *parser.Macro_paramsContext:
+		v.visitMacroParams(t)
+	case *parser.Macro_paramContext:
+		v.visitMacroParam(t)
+	case *parser.Preprocessor_blockContext:
+		v.visitPreprocessorBlock(t)
+	case *parser.Preprocessor_lineContext:
+		v.visitPreprocessorLine(t)
+	case *parser.Config_preambleContext:
+		v.visitConfigPreamble(t)
+	case *parser.Config_sectionContext:
+		v.visitConfigSection(t)
+	case *parser.Config_blockContext:
+		v.visitConfigBlock(t)
+	case *parser.Config_statementContext:
+		v.visitConfigStatement(t)
+	case *parser.Config_assignmentContext:
+		v.visitConfigAssignment(t)
+	case *parser.Config_valueContext:
+		v.visitConfigValue(t)
 	case *parser.ShebangContext:
 		v.visitShebang(t)
 	case *parser.ProbeContext:
 		v.visitProbe(t)
+	case *parser.Probe_listContext:
+		v.visitProbeList(t)
 	case *parser.Probe_defContext:
 		v.visitProbeDef(t)
 	case *parser.PredicateContext:
@@ -70,10 +96,18 @@ func (v *ASTVisitor) Visit(tree antlr.Tree) {
 		v.visitPrintfStatement(t)
 	case *parser.ExpressionContext:
 		v.visitExpression(t)
+	case *parser.Conditional_expressionContext:
+		v.visitConditionalExpression(t)
 	case *parser.Logical_or_expressionContext:
 		v.visitLogicalOrExpression(t)
 	case *parser.Logical_and_expressionContext:
 		v.visitLogicalAndExpression(t)
+	case *parser.Bitwise_or_expressionContext:
+		v.visitBitwiseOrExpression(t)
+	case *parser.Bitwise_xor_expressionContext:
+		v.visitBitwiseXorExpression(t)
+	case *parser.Bitwise_and_expressionContext:
+		v.visitBitwiseAndExpression(t)
 	case *parser.Equality_expressionContext:
 		v.visitEqualityExpression(t)
 	case *parser.Relational_expressionContext:
@@ -86,17 +120,33 @@ func (v *ASTVisitor) Visit(tree antlr.Tree) {
 		v.visitMultiplicativeExpression(t)
 	case *parser.Unary_expressionContext:
 		v.visitUnaryExpression(t)
+	case *parser.Cast_expressionContext:
+		v.visitCastExpression(t)
+	case *parser.Type_nameContext:
+		v.visitTypeName(t)
+	case *parser.PointerContext:
+		v.visitPointer(t)
 	case *parser.Expr_listContext:
 		v.visitExprList(t)
 	case *parser.Postfix_expressionContext:
 		v.visitPostfixExpression(t)
 	case *parser.Primary_expressionContext:
 		v.visitPrimaryExpression(t)
+	case *parser.Tuple_expressionContext:
+		v.visitTupleExpression(t)
 	case *parser.CommentContext:
 		v.visitComment(t)
 	case antlr.TerminalNode:
 		// Handle terminal nodes (tokens) - only write non-structural tokens
 		text := t.GetText()
+		if text == "[" {
+			v.formatter.writeOpenBracket()
+			return
+		}
+		if text == "]" {
+			v.formatter.writeCloseBracket()
+			return
+		}
 		if text != "" && text != "<EOF>" && text != "{" && text != "}" && text != ";" && text != "(" && text != ")" && text != "," {
 			v.formatter.writeString(text)
 		}
@@ -126,6 +176,10 @@ func (v *ASTVisitor) visitChildren(tree antlr.Tree) {
 func (v *ASTVisitor) visitProgram(ctx *parser.ProgramContext) {
 	if ctx.Shebang_section() != nil {
 		v.Visit(ctx.Shebang_section())
+	}
+	if ctx.Config_preamble() != nil {
+		v.Visit(ctx.Config_preamble())
+		v.formatter.ensureNewline()
 	}
 	if ctx.Content() != nil {
 		v.Visit(ctx.Content())
@@ -159,6 +213,106 @@ func (v *ASTVisitor) visitContent(ctx *parser.ContentContext) {
 	}
 }
 
+// visitMacroDefinition visits a macro definition
+func (v *ASTVisitor) visitMacroDefinition(ctx *parser.Macro_definitionContext) {
+	v.formatter.writeString("macro")
+	v.formatter.writeSpace()
+	v.formatter.writeString(ctx.IDENTIFIER().GetText())
+	v.formatter.writeOpenParen()
+	if ctx.Macro_params() != nil {
+		v.Visit(ctx.Macro_params())
+	}
+	v.formatter.writeCloseParen()
+	v.Visit(ctx.Block())
+	v.formatter.ensureNewline()
+}
+
+// visitMacroParams visits macro parameters
+func (v *ASTVisitor) visitMacroParams(ctx *parser.Macro_paramsContext) {
+	params := ctx.AllMacro_param()
+	for i, param := range params {
+		if i > 0 {
+			v.formatter.writeComma()
+		}
+		v.Visit(param)
+	}
+}
+
+// visitMacroParam visits a macro parameter
+func (v *ASTVisitor) visitMacroParam(ctx *parser.Macro_paramContext) {
+	v.formatter.writeString(ctx.GetText())
+}
+
+// visitPreprocessorBlock visits a preprocessor block
+func (v *ASTVisitor) visitPreprocessorBlock(ctx *parser.Preprocessor_blockContext) {
+	v.formatter.writeString(ctx.GetText())
+	v.formatter.writeNewline()
+}
+
+// visitPreprocessorLine visits a preprocessor line
+func (v *ASTVisitor) visitPreprocessorLine(ctx *parser.Preprocessor_lineContext) {
+	v.formatter.writeString(ctx.GetText())
+	v.formatter.writeNewline()
+}
+
+// visitConfigPreamble visits the config preamble
+func (v *ASTVisitor) visitConfigPreamble(ctx *parser.Config_preambleContext) {
+	v.visitChildren(ctx)
+}
+
+// visitConfigSection visits the config section
+func (v *ASTVisitor) visitConfigSection(ctx *parser.Config_sectionContext) {
+	v.formatter.writeString("config")
+	v.formatter.writeOperator("=")
+	v.Visit(ctx.Config_block())
+}
+
+// visitConfigBlock visits a config block
+func (v *ASTVisitor) visitConfigBlock(ctx *parser.Config_blockContext) {
+	v.formatter.writeBlockStart()
+
+	for i := 0; i < ctx.GetChildCount(); i++ {
+		child := ctx.GetChild(i)
+		switch node := child.(type) {
+		case *parser.Config_statementContext:
+			v.Visit(node)
+			v.formatter.writeSemicolon()
+			v.formatter.writeNewline()
+		case *parser.CommentContext:
+			v.Visit(node)
+		}
+	}
+
+	v.formatter.writeBlockEnd()
+}
+
+// visitConfigStatement visits a config statement
+func (v *ASTVisitor) visitConfigStatement(ctx *parser.Config_statementContext) {
+	v.visitChildren(ctx)
+}
+
+// visitConfigAssignment visits a config assignment
+func (v *ASTVisitor) visitConfigAssignment(ctx *parser.Config_assignmentContext) {
+	for i := 0; i < ctx.GetChildCount(); i++ {
+		child := ctx.GetChild(i)
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "=" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
+		} else {
+			v.Visit(child)
+		}
+	}
+}
+
+// visitConfigValue visits a config value
+func (v *ASTVisitor) visitConfigValue(ctx *parser.Config_valueContext) {
+	v.visitChildren(ctx)
+}
+
 // visitShebang visits a shebang
 func (v *ASTVisitor) visitShebang(ctx *parser.ShebangContext) {
 	v.formatter.writeString(ctx.GetText())
@@ -167,8 +321,8 @@ func (v *ASTVisitor) visitShebang(ctx *parser.ShebangContext) {
 
 // visitProbe visits a probe definition
 func (v *ASTVisitor) visitProbe(ctx *parser.ProbeContext) {
-	if ctx.Probe_def() != nil {
-		v.Visit(ctx.Probe_def())
+	if ctx.Probe_list() != nil {
+		v.Visit(ctx.Probe_list())
 	} else if ctx.END() != nil {
 		v.formatter.writeString("END")
 	}
@@ -179,6 +333,18 @@ func (v *ASTVisitor) visitProbe(ctx *parser.ProbeContext) {
 
 	v.Visit(ctx.Block())
 	v.formatter.ensureNewline()
+}
+
+// visitProbeList visits a probe list
+func (v *ASTVisitor) visitProbeList(ctx *parser.Probe_listContext) {
+	probes := ctx.AllProbe_def()
+	for i, probe := range probes {
+		v.Visit(probe)
+		if i < len(probes)-1 {
+			v.formatter.writeString(",")
+			v.formatter.writeNewline()
+		}
+	}
 }
 
 // visitProbeDef visits a probe definition
@@ -205,11 +371,16 @@ func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
 func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 	v.formatter.writeBlockStart()
 
-	// Visit all statements in the block
-	for _, stmt := range ctx.AllStatement() {
-		v.Visit(stmt)
-		v.formatter.writeSemicolon()
-		v.formatter.writeNewline()
+	for i := 0; i < ctx.GetChildCount(); i++ {
+		child := ctx.GetChild(i)
+		switch node := child.(type) {
+		case *parser.StatementContext:
+			v.Visit(node)
+			v.formatter.writeSemicolon()
+			v.formatter.writeNewline()
+		case *parser.CommentContext:
+			v.Visit(node)
+		}
 	}
 
 	v.formatter.writeBlockEnd()
@@ -292,7 +463,9 @@ func (v *ASTVisitor) visitFunctionCall(ctx *parser.Function_callContext) {
 func (v *ASTVisitor) visitIfStatement(ctx *parser.If_statementContext) {
 	v.formatter.writeKeyword("if")
 	v.formatter.writeOpenParen()
-	v.Visit(ctx.Expression())
+	if ctx.If_condition() != nil && ctx.If_condition().Expression() != nil {
+		v.Visit(ctx.If_condition().Expression())
+	}
 	v.formatter.writeCloseParen()
 	v.Visit(ctx.AllBlock()[0])
 
@@ -315,9 +488,24 @@ func (v *ASTVisitor) visitWhileStatement(ctx *parser.While_statementContext) {
 // visitForStatement visits a for statement
 func (v *ASTVisitor) visitForStatement(ctx *parser.For_statementContext) {
 	v.formatter.writeKeyword("for")
-	v.formatter.writeOpenParen()
+	if ctx.RANGE() != nil && ctx.Variable() != nil {
+		v.formatter.writeString(ctx.Variable().GetText())
+		v.formatter.writeSpace()
+		v.formatter.writeString(":")
+		v.formatter.writeSpace()
+		exprs := ctx.AllExpression()
+		if len(exprs) > 0 {
+			v.Visit(exprs[0])
+		}
+		v.formatter.writeString("..")
+		if len(exprs) > 1 {
+			v.Visit(exprs[1])
+		}
+		v.Visit(ctx.Block())
+		return
+	}
 
-	// Handle different for loop types
+	v.formatter.writeOpenParen()
 	if ctx.VARIABLE() != nil && ctx.MAP_NAME() != nil {
 		// for (var in map)
 		v.formatter.writeString(ctx.VARIABLE().GetText())
@@ -429,6 +617,23 @@ func (v *ASTVisitor) visitExpression(ctx *parser.ExpressionContext) {
 	v.visitChildren(ctx)
 }
 
+// visitConditionalExpression visits a conditional expression
+func (v *ASTVisitor) visitConditionalExpression(ctx *parser.Conditional_expressionContext) {
+	children := ctx.GetChildren()
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "?" || text == ":" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
+		} else {
+			v.Visit(child)
+		}
+	}
+}
+
 // visitExprList visits an expression list
 func (v *ASTVisitor) visitExprList(ctx *parser.Expr_listContext) {
 	for i, expr := range ctx.AllExpression() {
@@ -447,6 +652,19 @@ func (v *ASTVisitor) visitPostfixExpression(ctx *parser.Postfix_expressionContex
 // visitPrimaryExpression visits a primary expression
 func (v *ASTVisitor) visitPrimaryExpression(ctx *parser.Primary_expressionContext) {
 	v.visitChildren(ctx)
+}
+
+// visitTupleExpression visits a tuple expression
+func (v *ASTVisitor) visitTupleExpression(ctx *parser.Tuple_expressionContext) {
+	exprs := ctx.AllExpression()
+	v.formatter.writeOpenParen()
+	for i, expr := range exprs {
+		if i > 0 {
+			v.formatter.writeComma()
+		}
+		v.Visit(expr)
+	}
+	v.formatter.writeCloseParen()
 }
 
 // visitComment visits a comment
@@ -483,6 +701,57 @@ func (v *ASTVisitor) visitLogicalAndExpression(ctx *parser.Logical_and_expressio
 		if terminal, ok := child.(antlr.TerminalNode); ok {
 			text := terminal.GetText()
 			if text == "&&" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
+		} else {
+			v.Visit(child)
+		}
+	}
+}
+
+// visitBitwiseOrExpression visits a bitwise OR expression
+func (v *ASTVisitor) visitBitwiseOrExpression(ctx *parser.Bitwise_or_expressionContext) {
+	children := ctx.GetChildren()
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "|" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
+		} else {
+			v.Visit(child)
+		}
+	}
+}
+
+// visitBitwiseXorExpression visits a bitwise XOR expression
+func (v *ASTVisitor) visitBitwiseXorExpression(ctx *parser.Bitwise_xor_expressionContext) {
+	children := ctx.GetChildren()
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "^" {
+				v.formatter.writeOperator(text)
+			} else {
+				v.formatter.writeString(text)
+			}
+		} else {
+			v.Visit(child)
+		}
+	}
+}
+
+// visitBitwiseAndExpression visits a bitwise AND expression
+func (v *ASTVisitor) visitBitwiseAndExpression(ctx *parser.Bitwise_and_expressionContext) {
+	children := ctx.GetChildren()
+	for _, child := range children {
+		if terminal, ok := child.(antlr.TerminalNode); ok {
+			text := terminal.GetText()
+			if text == "&" {
 				v.formatter.writeOperator(text)
 			} else {
 				v.formatter.writeString(text)
@@ -583,13 +852,37 @@ func (v *ASTVisitor) visitUnaryExpression(ctx *parser.Unary_expressionContext) {
 	v.visitChildren(ctx)
 }
 
+// visitCastExpression visits a cast expression
+func (v *ASTVisitor) visitCastExpression(ctx *parser.Cast_expressionContext) {
+	v.formatter.writeString("(")
+	v.Visit(ctx.Type_name())
+	v.formatter.writeString(")")
+	v.Visit(ctx.Unary_expression())
+}
+
+// visitTypeName visits a type name
+func (v *ASTVisitor) visitTypeName(ctx *parser.Type_nameContext) {
+	if ctx.STRUCT() != nil {
+		v.formatter.writeString("struct")
+		v.formatter.writeSpace()
+	}
+	v.formatter.writeString(ctx.IDENTIFIER().GetText())
+	if ctx.Pointer() != nil {
+		v.formatter.writeSpace()
+		v.Visit(ctx.Pointer())
+	}
+}
+
+// visitPointer visits a pointer type suffix
+func (v *ASTVisitor) visitPointer(ctx *parser.PointerContext) {
+	v.formatter.writeString("*")
+	if ctx.Pointer() != nil {
+		v.Visit(ctx.Pointer())
+	}
+}
+
 // isAssignmentOperator checks if a string is an assignment operator
 func (v *ASTVisitor) isAssignmentOperator(text string) bool {
 	operators := []string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
-	for _, op := range operators {
-		if text == op {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(operators, text)
 }
