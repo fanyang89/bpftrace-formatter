@@ -9,9 +9,25 @@ import (
 
 	"github.com/fanyang89/bpftrace-formatter/config"
 	"github.com/fanyang89/bpftrace-formatter/formatter"
+	"github.com/fanyang89/bpftrace-formatter/lsp"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "lsp" {
+		lspFlags := flag.NewFlagSet("lsp", flag.ExitOnError)
+		help := lspFlags.Bool("help", false, "Show help message")
+		lspFlags.Usage = func() {
+			fmt.Printf("Usage:\n  %s lsp [-help]\n", filepath.Base(os.Args[0]))
+		}
+		lspFlags.Parse(os.Args[2:])
+		if *help {
+			lspFlags.Usage()
+			return
+		}
+		lsp.RunServer()
+		return
+	}
+
 	// Parse command line flags
 	var (
 		generateConfig = flag.Bool("generate-config", false, "Generate default configuration file")

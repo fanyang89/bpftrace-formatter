@@ -26,3 +26,10 @@ tasks:
     desc: Format Go code
     cmds:
       - go fmt ./...
+
+  lsp-smoke:
+    desc: Smoke test for btfmt LSP (stdio)
+    deps:
+      - build
+    cmds:
+      - python3 scripts/lsp_smoke.py
