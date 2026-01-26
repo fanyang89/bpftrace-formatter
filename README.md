@@ -67,6 +67,16 @@ task build
 - `-config-output <file>`: Output path for generated config (default: .btfmt.json)
 - `-help`: Show help message
 
+### Language Server (LSP)
+
+Run the formatter as an LSP server:
+
+```bash
+btfmt lsp
+```
+
+The server communicates over stdio (LSP JSON-RPC). Your client/editor must handle JSON-RPC framing (for example, `Content-Length` headers).
+
 ## Configuration
 
 The formatter loads configuration in the following order:
@@ -75,6 +85,19 @@ The formatter loads configuration in the following order:
 2. `.btfmt.json` in the current directory or parent directories
 3. `~/.btfmt.json`
 4. Built-in defaults
+
+### LSP configuration resolution
+
+When running `btfmt lsp`, configuration is resolved per document using:
+
+1. `btfmt.configPath` from client settings, if set and the file exists
+2. `.btfmt.json` in the workspace root (or the document directory if no workspace root is provided), searching parent directories up to the filesystem root
+3. `~/.btfmt.json`
+4. Built-in defaults
+
+If `btfmt.configPath` is set but the file does not exist, the server uses built-in defaults and does not fall back to searching for `.btfmt.json`.
+
+Client-provided settings (everything under `btfmt` except `configPath`) are merged on top of the resolved file config; client settings take precedence.
 
 A minimal example configuration:
 

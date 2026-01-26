@@ -1,0 +1,57 @@
+{
+  "name": "btfmt-lsp",
+  "displayName": "btfmt LSP",
+  "description": "bpftrace formatter LSP client for VS Code",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:bpftrace"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "bpftrace",
+        "aliases": ["bpftrace"],
+        "extensions": [".bt"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configuration": {
+      "title": "btfmt",
+      "properties": {
+        "btfmt.serverPath": {
+          "type": "string",
+          "default": "btfmt",
+          "description": "Path to the btfmt executable. Defaults to 'btfmt' in PATH."
+        },
+        "btfmt.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to .btfmt.json. Can be absolute or workspace-relative."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -p ./ -w",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5"
+  }
+}

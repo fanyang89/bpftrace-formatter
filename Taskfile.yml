@@ -26,3 +26,40 @@ tasks:
     desc: Format Go code
     cmds:
       - go fmt ./...
+
+  lsp-smoke:
+    desc: Smoke test for btfmt LSP (stdio)
+    deps:
+      - build
+    cmds:
+      - python3 scripts/lsp_smoke.py
+
+  vscode-install:
+    desc: Install dependencies for the VS Code extension
+    dir: vscode-extension
+    cmds:
+      - npm install
+
+  vscode-build:
+    desc: Build the VS Code extension
+    dir: vscode-extension
+    deps:
+      - vscode-install
+    cmds:
+      - npm run compile
+
+  vscode-package:
+    desc: Package the VS Code extension (vsix)
+    dir: vscode-extension
+    deps:
+      - vscode-build
+    cmds:
+      - npx vsce package
+
+  vscode-publish:
+    desc: Publish the VS Code extension (requires VSCE_PAT)
+    dir: vscode-extension
+    deps:
+      - vscode-build
+    cmds:
+      - npx vsce publish

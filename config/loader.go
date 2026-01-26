@@ -50,6 +50,64 @@ func (cl *ConfigLoader) LoadConfig() (*Config, error) {
 	return config, nil
 }
 
+// LoadConfigFrom loads configuration relative to baseDir, using explicitPath if provided.
+// If explicitPath is set but missing, defaults are returned without searching.
+func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error) {
+	if explicitPath != "" {
+		configPath := explicitPath
+		if !filepath.IsAbs(explicitPath) && baseDir != "" {
+			configPath = filepath.Join(baseDir, explicitPath)
+		}
+		if _, err := os.Stat(configPath); err == nil {
+			if verbose {
+				fmt.Printf("Loading configuration from: %s\n", configPath)
+			}
+			config, err := LoadConfig(configPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
+			}
+			return config, nil
+		}
+		if verbose {
+			fmt.Printf("Warning: specified config file %s not found\n", configPath)
+		}
+		return DefaultConfig(), nil
+	}
+
+	if baseDir != "" {
+		if configPath := searchUpwards(baseDir, ".btfmt.json"); configPath != "" {
+			if verbose {
+				fmt.Printf("Loading configuration from: %s\n", configPath)
+			}
+			config, err := LoadConfig(configPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
+			}
+			return config, nil
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		homeConfig := filepath.Join(homeDir, ".btfmt.json")
+		if _, err := os.Stat(homeConfig); err == nil {
+			if verbose {
+				fmt.Printf("Loading configuration from: %s\n", homeConfig)
+			}
+			config, err := LoadConfig(homeConfig)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load config from %s: %w", homeConfig, err)
+			}
+			return config, nil
+		}
+	}
+
+	if verbose {
+		fmt.Println("No configuration file found, using defaults")
+	}
+	return DefaultConfig(), nil
+}
+
 // findConfigFile finds the configuration file in order of precedence:
 // 1. Command line specified file
 // 2. .btfmt.json in current directory
@@ -89,6 +147,10 @@ func (cl *ConfigLoader) findConfigFile() string {
 
 // searchUpwards searches for a file in the current directory and parent directories
 func (cl *ConfigLoader) searchUpwards(startDir, filename string) string {
+	return searchUpwards(startDir, filename)
+}
+
+func searchUpwards(startDir, filename string) string {
 	currentDir := startDir
 
 	for {
@@ -97,10 +159,8 @@ func (cl *ConfigLoader) searchUpwards(startDir, filename string) string {
 			return configPath
 		}
 
-		// Move to parent directory
 		parentDir := filepath.Dir(currentDir)
 		if parentDir == currentDir {
-			// Reached root directory
 			break
 		}
 		currentDir = parentDir
