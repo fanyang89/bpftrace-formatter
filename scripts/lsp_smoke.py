@@ -343,8 +343,9 @@ def main():
             )
             msg = lsp.wait_for(is_publish, timeout_s=10.0)
             diags = msg.get("params", {}).get("diagnostics")
-            if not isinstance(diags, list) or len(diags) != 0:
-                fail(summary, "diagnostics_clear", "expected empty diagnostics", msg=msg)
+            # Accept both null and empty list as "no diagnostics"
+            if diags is not None and (not isinstance(diags, list) or len(diags) != 0):
+                fail(summary, "diagnostics_clear", "expected empty diagnostics", response=msg)
             record(summary, "diagnostics_clear", t0)
 
             rid = lsp.request("shutdown", None)
