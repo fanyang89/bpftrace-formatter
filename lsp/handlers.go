@@ -166,7 +166,7 @@ func didChangeConfiguration(_ *glsp.Context, params *protocol.DidChangeConfigura
 	}
 
 	configResolver.SetSettings(normalizeSettingsMap(settings))
-	return nil
+	return documentStore.RefreshConfigs()
 }
 
 func didFormat(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {

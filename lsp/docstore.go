@@ -55,6 +55,41 @@ func (s *DocumentStore) Get(uri string) (*Document, bool) {
 	return doc, ok
 }
 
+func (s *DocumentStore) RefreshConfigs() error {
+	if s.resolver == nil {
+		return nil
+	}
+
+	type docRef struct {
+		uri  string
+		path string
+	}
+
+	s.mu.RLock()
+	docs := make([]docRef, 0, len(s.docs))
+	for uri, doc := range s.docs {
+		if doc == nil {
+			continue
+		}
+		docs = append(docs, docRef{uri: uri, path: doc.Path})
+	}
+	s.mu.RUnlock()
+
+	for _, doc := range docs {
+		resolvedConfig, err := s.resolver.ResolveForDocument(doc.uri, doc.path)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		if current, ok := s.docs[doc.uri]; ok && current != nil {
+			current.Config = resolvedConfig
+		}
+		s.mu.Unlock()
+	}
+
+	return nil
+}
+
 func (s *DocumentStore) upsert(uri string, version int32, text string) (*Document, error) {
 	path, err := fileURIToPath(uri)
 	if err != nil {
@@ -100,5 +135,9 @@ func fileURIToPath(uri string) (string, error) {
 	if parsed.Path == "" {
 		return "", fmt.Errorf("empty uri path")
 	}
-	return filepath.FromSlash(parsed.Path), nil
+	unescapedPath, err := url.PathUnescape(parsed.Path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.FromSlash(unescapedPath), nil
 }

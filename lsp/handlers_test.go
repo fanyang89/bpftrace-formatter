@@ -97,6 +97,41 @@ func TestDidOpen_PopulatesDiagnosticsForInvalidDocument(t *testing.T) {
 	}
 }
 
+func TestDidChangeConfiguration_RefreshesDocumentConfig(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "kprobe:sys_clone { @x = count(); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	doc, ok := documentStore.Get(uri)
+	if !ok || doc == nil {
+		t.Fatalf("expected document in store")
+	}
+	if doc.Config == nil || doc.Config.Indent.Size != 4 {
+		t.Fatalf("expected default indent size 4")
+	}
+
+	settings := map[string]any{
+		"btfmt": map[string]any{
+			"configPath": filepath.Join(t.TempDir(), "missing.json"),
+			"indent":     map[string]any{"size": 2},
+		},
+	}
+	if err := didChangeConfiguration(nil, &protocol.DidChangeConfigurationParams{Settings: settings}); err != nil {
+		t.Fatalf("didChangeConfiguration: %v", err)
+	}
+
+	doc, ok = documentStore.Get(uri)
+	if !ok || doc == nil {
+		t.Fatalf("expected document in store")
+	}
+	if doc.Config == nil || doc.Config.Indent.Size != 2 {
+		t.Fatalf("expected updated indent size 2")
+	}
+}
+
 func TestDidChange_UpdatesDocumentTextAndDiagnostics(t *testing.T) {
 	valid := "kprobe:sys_clone { @x = count(); }\n"
 
@@ -172,6 +207,9 @@ func TestDidFormat_MatchesFormatterOutput(t *testing.T) {
 	want, err := formatter.NewASTFormatter(doc.Config).Format(input)
 	if err != nil {
 		t.Fatalf("Format: %v", err)
+	}
+	if !strings.HasSuffix(want, "\n") {
+		want += "\n"
 	}
 	if edits[0].NewText != want {
 		t.Fatalf("didFormat: formatted text mismatch")
