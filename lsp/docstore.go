@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -132,12 +133,54 @@ func fileURIToPath(uri string) (string, error) {
 	if parsed.Scheme != "file" {
 		return "", fmt.Errorf("unsupported uri scheme: %s", parsed.Scheme)
 	}
-	if parsed.Path == "" {
+	if parsed.Path == "" && parsed.Host == "" {
 		return "", fmt.Errorf("empty uri path")
 	}
 	unescapedPath, err := url.PathUnescape(parsed.Path)
 	if err != nil {
 		return "", err
 	}
+
+	if parsed.Host != "" {
+		if isDriveHost(parsed.Host) {
+			if strings.HasPrefix(unescapedPath, "/") {
+				unescapedPath = parsed.Host + unescapedPath
+			} else if unescapedPath == "" {
+				unescapedPath = parsed.Host
+			} else {
+				unescapedPath = parsed.Host + "/" + unescapedPath
+			}
+		} else {
+			unescapedPath = "//" + parsed.Host + unescapedPath
+		}
+	}
+
+	unescapedPath = trimLeadingDriveSlash(unescapedPath)
+
 	return filepath.FromSlash(unescapedPath), nil
+}
+
+func isDriveHost(host string) bool {
+	if len(host) != 2 {
+		return false
+	}
+	if host[1] != ':' {
+		return false
+	}
+	c := host[0]
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func trimLeadingDriveSlash(path string) string {
+	if len(path) < 3 {
+		return path
+	}
+	if path[0] != '/' {
+		return path
+	}
+	c := path[1]
+	if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) && path[2] == ':' {
+		return path[1:]
+	}
+	return path
 }

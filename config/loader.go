@@ -54,18 +54,22 @@ func (cl *ConfigLoader) LoadConfig() (*Config, error) {
 // If explicitPath is set but missing, defaults are returned without searching.
 func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error) {
 	if explicitPath != "" {
-		if _, err := os.Stat(explicitPath); err == nil {
+		configPath := explicitPath
+		if !filepath.IsAbs(explicitPath) && baseDir != "" {
+			configPath = filepath.Join(baseDir, explicitPath)
+		}
+		if _, err := os.Stat(configPath); err == nil {
 			if verbose {
-				fmt.Printf("Loading configuration from: %s\n", explicitPath)
+				fmt.Printf("Loading configuration from: %s\n", configPath)
 			}
-			config, err := LoadConfig(explicitPath)
+			config, err := LoadConfig(configPath)
 			if err != nil {
-				return nil, fmt.Errorf("failed to load config from %s: %w", explicitPath, err)
+				return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
 			}
 			return config, nil
 		}
 		if verbose {
-			fmt.Printf("Warning: specified config file %s not found\n", explicitPath)
+			fmt.Printf("Warning: specified config file %s not found\n", configPath)
 		}
 		return DefaultConfig(), nil
 	}

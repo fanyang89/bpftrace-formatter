@@ -30,6 +30,43 @@ func TestFileURIToPath_Errors(t *testing.T) {
 	}
 }
 
+func TestFileURIToPath_WindowsForms(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+		want string
+	}{
+		{
+			name: "drive_letter",
+			uri:  "file:///C:/Windows/System32",
+			want: filepath.FromSlash("C:/Windows/System32"),
+		},
+		{
+			name: "unc_host",
+			uri:  "file://server/share/path/file.bt",
+			want: filepath.FromSlash("//server/share/path/file.bt"),
+		},
+		{
+			name: "drive_host",
+			uri:  "file://C:/Windows/System32",
+			want: filepath.FromSlash("C:/Windows/System32"),
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := fileURIToPath(tc.uri)
+			if err != nil {
+				t.Fatalf("fileURIToPath(%q): %v", tc.uri, err)
+			}
+			if got != tc.want {
+				t.Fatalf("fileURIToPath(%q) = %q, want %q", tc.uri, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDocumentStoreOpen_DefaultConfig(t *testing.T) {
 	store := NewDocumentStore(nil)
 	uri := url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(t.TempDir(), "test.bt"))}

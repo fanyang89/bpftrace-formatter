@@ -7,16 +7,6 @@ import (
 	"testing"
 )
 
-func writeFile(t *testing.T, path string, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
 func TestConfigLoader_findConfigFile_ExplicitPathWins(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "custom.json")
@@ -57,7 +47,7 @@ func TestConfigLoader_searchUpwards_NearestAncestorWins(t *testing.T) {
 	a := filepath.Join(tmp, "a")
 	b := filepath.Join(a, "b")
 	c := filepath.Join(b, "c")
-	if err := os.MkdirAll(c, 0755); err != nil {
+	if err := os.MkdirAll(c, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -77,10 +67,10 @@ func TestConfigLoader_findConfigFile_FallsBackToHome(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "cwd")
-	if err := os.MkdirAll(home, 0755); err != nil {
+	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("mkdir home: %v", err)
 	}
-	if err := os.MkdirAll(cwd, 0755); err != nil {
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
 		t.Fatalf("mkdir cwd: %v", err)
 	}
 	t.Setenv("HOME", home)
@@ -117,5 +107,36 @@ func TestConfigLoader_LoadConfig_InvalidJSONIncludesPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to load config from "+cfgPath) {
 		t.Fatalf("expected error to include path; got: %v", err)
+	}
+}
+
+func TestLoadConfigFrom_ExplicitRelativeUsesBaseDir(t *testing.T) {
+	baseDir := t.TempDir()
+	configDir := filepath.Join(baseDir, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	configPath := filepath.Join(configDir, "btfmt.json")
+	if err := os.WriteFile(configPath, []byte(`{"indent":{"size":2}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := LoadConfigFrom(baseDir, filepath.Join("config", "btfmt.json"), false)
+	if err != nil {
+		t.Fatalf("LoadConfigFrom: %v", err)
+	}
+	if cfg.Indent.Size != 2 {
+		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, 2)
+	}
+}
+
+func TestLoadConfigFrom_ExplicitMissingRelativeFallsBack(t *testing.T) {
+	baseDir := t.TempDir()
+	cfg, err := LoadConfigFrom(baseDir, filepath.Join("config", "missing.json"), false)
+	if err != nil {
+		t.Fatalf("LoadConfigFrom: %v", err)
+	}
+	if cfg.Indent.Size != DefaultConfig().Indent.Size {
+		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, DefaultConfig().Indent.Size)
 	}
 }
