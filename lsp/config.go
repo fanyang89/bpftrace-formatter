@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -12,10 +13,10 @@ import (
 )
 
 type ConfigResolver struct {
-	mu            sync.Mutex
-	workspaceRoot string
-	settings      map[string]any
-	cache         map[string]*config.Config
+	mu             sync.Mutex
+	workspaceRoots []string
+	settings       map[string]any
+	cache          map[string]*config.Config
 }
 
 func NewConfigResolver() *ConfigResolver {
@@ -25,7 +26,18 @@ func NewConfigResolver() *ConfigResolver {
 func (r *ConfigResolver) SetWorkspaceRoot(root string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.workspaceRoot = root
+	if root == "" {
+		r.workspaceRoots = nil
+	} else {
+		r.workspaceRoots = []string{filepath.Clean(root)}
+	}
+	r.cache = make(map[string]*config.Config)
+}
+
+func (r *ConfigResolver) SetWorkspaceRoots(roots []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.workspaceRoots = normalizeWorkspaceRoots(roots)
 	r.cache = make(map[string]*config.Config)
 }
 
@@ -44,7 +56,7 @@ func (r *ConfigResolver) ResolveForDocument(uri string, docPath string) (*config
 		return cached, nil
 	}
 
-	baseDir := r.workspaceRoot
+	baseDir := selectWorkspaceRoot(docPath, r.workspaceRoots)
 	if baseDir == "" {
 		baseDir = filepath.Dir(docPath)
 	}
@@ -110,27 +122,41 @@ func extractBtfmtSettings(settings map[string]any) (map[string]any, string) {
 }
 
 func workspaceRootFromParams(params *protocol.InitializeParams) string {
+	roots := workspaceRootsFromParams(params)
+	if len(roots) > 0 {
+		return roots[0]
+	}
+	return ""
+}
+
+func workspaceRootsFromParams(params *protocol.InitializeParams) []string {
 	if params == nil {
-		return ""
+		return nil
 	}
 
 	if len(params.WorkspaceFolders) > 0 {
-		if path, err := fileURIToPath(params.WorkspaceFolders[0].URI); err == nil {
-			return path
+		roots := make([]string, 0, len(params.WorkspaceFolders))
+		for _, folder := range params.WorkspaceFolders {
+			if path, err := fileURIToPath(folder.URI); err == nil && path != "" {
+				roots = append(roots, path)
+			}
+		}
+		if len(roots) > 0 {
+			return roots
 		}
 	}
 
 	if params.RootURI != nil {
 		if path, err := fileURIToPath(string(*params.RootURI)); err == nil {
-			return path
+			return []string{path}
 		}
 	}
 
 	if params.RootPath != nil {
-		return *params.RootPath
+		return []string{*params.RootPath}
 	}
 
-	return ""
+	return nil
 }
 
 func settingsFromParams(params *protocol.InitializeParams) map[string]any {
@@ -167,4 +193,62 @@ func normalizeSettingsMap(settings map[string]any) map[string]any {
 	}
 
 	return map[string]any{"btfmt": settings}
+}
+
+func normalizeWorkspaceRoots(roots []string) []string {
+	if len(roots) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		normalized = append(normalized, filepath.Clean(root))
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func selectWorkspaceRoot(docPath string, roots []string) string {
+	if docPath == "" || len(roots) == 0 {
+		return ""
+	}
+	docPath = filepath.Clean(docPath)
+	best := ""
+	bestLen := -1
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		cleanRoot := filepath.Clean(root)
+		if !isSubpath(cleanRoot, docPath) {
+			continue
+		}
+		if len(cleanRoot) > bestLen {
+			best = cleanRoot
+			bestLen = len(cleanRoot)
+		}
+	}
+	return best
+}
+
+func isSubpath(root string, path string) bool {
+	if root == "" || path == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	prefix := ".." + string(filepath.Separator)
+	if rel == ".." || strings.HasPrefix(rel, prefix) {
+		return false
+	}
+	return true
 }

@@ -36,8 +36,8 @@ func newHandler() protocol.Handler {
 
 func initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error) {
 	if params != nil {
-		if root := workspaceRootFromParams(params); root != "" {
-			configResolver.SetWorkspaceRoot(root)
+		if roots := workspaceRootsFromParams(params); len(roots) > 0 {
+			configResolver.SetWorkspaceRoots(roots)
 		}
 		supported := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 		configSupported.Store(supported)

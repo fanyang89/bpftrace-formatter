@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -86,38 +87,74 @@ func TestSettingsFromConfigurationResult(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRootFromParams_Priority(t *testing.T) {
+func TestWorkspaceRootsFromParams_Priority(t *testing.T) {
 	workspace := t.TempDir()
+	second := t.TempDir()
 	root := t.TempDir()
 	rootPath := t.TempDir()
 
 	rootURI := fileURIForPath(root)
 	params := &protocol.InitializeParams{
-		WorkspaceFolders: []protocol.WorkspaceFolder{{URI: fileURIForPath(workspace)}},
-		RootURI:          &rootURI,
-		RootPath:         &rootPath,
+		WorkspaceFolders: []protocol.WorkspaceFolder{
+			{URI: fileURIForPath(workspace)},
+			{URI: fileURIForPath(second)},
+		},
+		RootURI:  &rootURI,
+		RootPath: &rootPath,
 	}
 
-	got := workspaceRootFromParams(params)
-	if got != workspace {
-		t.Fatalf("workspaceRootFromParams = %q, want %q", got, workspace)
+	got := workspaceRootsFromParams(params)
+	want := []string{workspace, second}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("workspaceRootsFromParams = %#v, want %#v", got, want)
 	}
 }
 
-func TestWorkspaceRootFromParams_Fallbacks(t *testing.T) {
+func TestWorkspaceRootsFromParams_Fallbacks(t *testing.T) {
 	root := t.TempDir()
 	rootURI := fileURIForPath(root)
 	params := &protocol.InitializeParams{RootURI: &rootURI}
 
-	got := workspaceRootFromParams(params)
-	if got != root {
-		t.Fatalf("workspaceRootFromParams rootURI = %q, want %q", got, root)
+	got := workspaceRootsFromParams(params)
+	want := []string{root}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("workspaceRootsFromParams rootURI = %#v, want %#v", got, want)
 	}
 
 	rootPath := t.TempDir()
 	params = &protocol.InitializeParams{RootPath: &rootPath}
-	got = workspaceRootFromParams(params)
-	if got != rootPath {
-		t.Fatalf("workspaceRootFromParams rootPath = %q, want %q", got, rootPath)
+	got = workspaceRootsFromParams(params)
+	want = []string{rootPath}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("workspaceRootsFromParams rootPath = %#v, want %#v", got, want)
+	}
+}
+
+func TestConfigResolver_UsesMatchingWorkspaceRoot(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(rootA, ".btfmt.json"), []byte(`{"indent":{"size":2}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile rootA: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootB, ".btfmt.json"), []byte(`{"indent":{"size":6}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile rootB: %v", err)
+	}
+
+	docPath := filepath.Join(rootB, "src", "probe.bt")
+	if err := os.MkdirAll(filepath.Dir(docPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	resolver := NewConfigResolver()
+	resolver.SetWorkspaceRoots([]string{rootA, rootB})
+
+	uri := url.URL{Scheme: "file", Path: filepath.ToSlash(docPath)}
+	cfg, err := resolver.ResolveForDocument(uri.String(), docPath)
+	if err != nil {
+		t.Fatalf("ResolveForDocument: %v", err)
+	}
+	if cfg == nil || cfg.Indent.Size != 6 {
+		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, 6)
 	}
 }

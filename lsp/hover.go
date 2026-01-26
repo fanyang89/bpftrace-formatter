@@ -135,9 +135,10 @@ func snippetForContext(text string, ctx antlr.ParserRuleContext) string {
 	if startToken != nil && stopToken != nil {
 		start := startToken.GetStart()
 		stop := stopToken.GetStop()
-		if start >= 0 && stop >= start && stop+1 <= len(text) {
-			snippet := strings.TrimSpace(text[start : stop+1])
-			return truncateRunes(snippet, 120)
+		if start >= 0 && stop >= start {
+			if snippet, ok := sliceByRuneOffsets(text, start, stop+1); ok {
+				return truncateRunes(strings.TrimSpace(snippet), 120)
+			}
 		}
 	}
 
@@ -154,4 +155,18 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit])
+}
+
+func sliceByRuneOffsets(text string, start int, end int) (string, bool) {
+	if start < 0 || end < start {
+		return "", false
+	}
+	runes := []rune(text)
+	if start > len(runes) {
+		return "", false
+	}
+	if end > len(runes) {
+		end = len(runes)
+	}
+	return string(runes[start:end]), true
 }
