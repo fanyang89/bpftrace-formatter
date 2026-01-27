@@ -130,8 +130,11 @@ func fileURIToPath(uri string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if parsed.Scheme != "file" {
+	if parsed.Scheme == "" {
 		return "", fmt.Errorf("unsupported uri scheme: %s", parsed.Scheme)
+	}
+	if parsed.Scheme != "file" {
+		return "", nil
 	}
 	if parsed.Path == "" && parsed.Host == "" {
 		return "", fmt.Errorf("empty uri path")

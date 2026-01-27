@@ -58,7 +58,13 @@ func (r *ConfigResolver) ResolveForDocument(uri string, docPath string) (*config
 
 	baseDir := selectWorkspaceRoot(docPath, r.workspaceRoots)
 	if baseDir == "" {
-		baseDir = filepath.Dir(docPath)
+		if docPath == "" {
+			if len(r.workspaceRoots) > 0 {
+				baseDir = r.workspaceRoots[0]
+			}
+		} else {
+			baseDir = filepath.Dir(docPath)
+		}
 	}
 
 	settingsOverride, configPath := extractBtfmtSettings(r.settings)

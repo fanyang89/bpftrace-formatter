@@ -22,11 +22,18 @@ func TestFileURIToPath(t *testing.T) {
 }
 
 func TestFileURIToPath_Errors(t *testing.T) {
-	if _, err := fileURIToPath("http://example.com"); err == nil {
-		t.Fatalf("expected error for non-file scheme")
-	}
 	if _, err := fileURIToPath("file://"); err == nil {
 		t.Fatalf("expected error for empty file path")
+	}
+}
+
+func TestFileURIToPath_NonFileScheme(t *testing.T) {
+	got, err := fileURIToPath("untitled:Untitled-1")
+	if err != nil {
+		t.Fatalf("fileURIToPath: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("fileURIToPath = %q, want empty string", got)
 	}
 }
 
@@ -80,6 +87,19 @@ func TestDocumentStoreOpen_DefaultConfig(t *testing.T) {
 	}
 	if doc.Config.Indent.Size != config.DefaultConfig().Indent.Size {
 		t.Fatalf("indent size = %d, want %d", doc.Config.Indent.Size, config.DefaultConfig().Indent.Size)
+	}
+}
+
+func TestDocumentStoreOpen_NonFileURI(t *testing.T) {
+	store := NewDocumentStore(nil)
+	uri := "untitled:Untitled-1"
+
+	doc, err := store.Open(uri, 1, "kprobe:sys_clone { @x = count(); }\n")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if doc.Path != "" {
+		t.Fatalf("path = %q, want empty string", doc.Path)
 	}
 }
 

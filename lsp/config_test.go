@@ -158,3 +158,21 @@ func TestConfigResolver_UsesMatchingWorkspaceRoot(t *testing.T) {
 		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, 6)
 	}
 }
+
+func TestConfigResolver_UsesWorkspaceRootWhenDocPathEmpty(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".btfmt.json"), []byte(`{"indent":{"size":2}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	resolver := NewConfigResolver()
+	resolver.SetWorkspaceRoots([]string{root})
+
+	cfg, err := resolver.ResolveForDocument("untitled:Untitled-1", "")
+	if err != nil {
+		t.Fatalf("ResolveForDocument: %v", err)
+	}
+	if cfg == nil || cfg.Indent.Size != 2 {
+		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, 2)
+	}
+}
