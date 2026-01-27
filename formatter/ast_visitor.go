@@ -275,6 +275,15 @@ func (v *ASTVisitor) visitConfigBlock(ctx *parser.Config_blockContext) {
 		child := ctx.GetChild(i)
 		switch node := child.(type) {
 		case *parser.Config_statementContext:
+			if v.formatter.config.Comments.PreserveInline {
+				if comment, index := nextInlineConfigComment(ctx, i+1); comment != nil && v.isInlineCommentAfter(node, comment) {
+					v.Visit(node)
+					v.formatter.writeSemicolon()
+					v.Visit(comment)
+					i = index
+					continue
+				}
+			}
 			v.Visit(node)
 			v.formatter.writeSemicolon()
 			v.formatter.writeNewline()
@@ -363,7 +372,13 @@ func (v *ASTVisitor) visitProbeDef(ctx *parser.Probe_defContext) {
 
 // visitPredicate visits a predicate
 func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
-	v.formatter.writeNewline()
+	if v.formatter.config.Probes.AlignPredicates {
+		if !v.formatter.lastWasNewline {
+			v.formatter.writeSpace()
+		}
+	} else {
+		v.formatter.writeNewline()
+	}
 	v.formatter.writeString("/ ")
 	v.Visit(ctx.Expression())
 	v.formatter.writeString(" /")
@@ -377,6 +392,15 @@ func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 		child := ctx.GetChild(i)
 		switch node := child.(type) {
 		case *parser.StatementContext:
+			if v.formatter.config.Comments.PreserveInline {
+				if comment, index := nextInlineBlockComment(ctx, i+1); comment != nil && v.isInlineCommentAfter(node, comment) {
+					v.Visit(node)
+					v.formatter.writeSemicolon()
+					v.Visit(comment)
+					i = index
+					continue
+				}
+			}
 			v.Visit(node)
 			v.formatter.writeSemicolon()
 			v.formatter.writeNewline()
@@ -475,7 +499,11 @@ func (v *ASTVisitor) visitIfStatement(ctx *parser.If_statementContext) {
 
 	if len(ctx.AllBlock()) > 1 {
 		v.formatter.writeSpace()
-		v.formatter.writeKeyword("else")
+		if v.formatter.config.Blocks.BraceStyle == "same_line" {
+			v.formatter.writeKeyword("else")
+		} else {
+			v.formatter.writeString("else")
+		}
 		v.Visit(ctx.AllBlock()[1])
 	}
 }
@@ -675,11 +703,66 @@ func (v *ASTVisitor) visitTupleExpression(ctx *parser.Tuple_expressionContext) {
 // visitComment visits a comment
 func (v *ASTVisitor) visitComment(ctx *parser.CommentContext) {
 	commentText := ctx.GetText()
-	if v.formatter.config.Comments.IndentLevel > 0 {
-		v.formatter.writeIndent()
+	inline := v.formatter.config.Comments.PreserveInline && !v.formatter.lastWasNewline
+	if inline {
+		v.formatter.writeSpace()
+		v.formatter.writeString(commentText)
+		v.formatter.writeNewline()
+		return
 	}
+
+	if !v.formatter.lastWasNewline {
+		v.formatter.writeNewline()
+	}
+
+	indentLevel := v.formatter.indentLevel
+	extraIndent := v.formatter.config.Comments.IndentLevel
+	if extraIndent < 0 {
+		extraIndent = 0
+	}
+	indentLevel += extraIndent
+	v.formatter.writeIndentLevel(indentLevel)
 	v.formatter.writeString(commentText)
 	v.formatter.writeNewline()
+}
+
+func (v *ASTVisitor) isInlineCommentAfter(statement antlr.ParserRuleContext, comment *parser.CommentContext) bool {
+	if statement == nil || comment == nil {
+		return false
+	}
+	if !v.formatter.config.Comments.PreserveInline {
+		return false
+	}
+	statementStop := statement.GetStop()
+	commentStart := comment.GetStart()
+	if statementStop == nil || commentStart == nil {
+		return false
+	}
+	return statementStop.GetLine() == commentStart.GetLine()
+}
+
+func nextInlineBlockComment(ctx *parser.BlockContext, start int) (*parser.CommentContext, int) {
+	for i := start; i < ctx.GetChildCount(); i++ {
+		switch node := ctx.GetChild(i).(type) {
+		case *parser.CommentContext:
+			return node, i
+		case *parser.StatementContext, *parser.Preprocessor_lineContext:
+			return nil, -1
+		}
+	}
+	return nil, -1
+}
+
+func nextInlineConfigComment(ctx *parser.Config_blockContext, start int) (*parser.CommentContext, int) {
+	for i := start; i < ctx.GetChildCount(); i++ {
+		switch node := ctx.GetChild(i).(type) {
+		case *parser.CommentContext:
+			return node, i
+		case *parser.Config_statementContext, *parser.Preprocessor_lineContext:
+			return nil, -1
+		}
+	}
+	return nil, -1
 }
 
 // visitLogicalOrExpression visits a logical OR expression

@@ -17,6 +17,7 @@ type ASTFormatter struct {
 	indentLevel    int
 	lastWasNewline bool
 	needIndent     bool
+	lineLength     int
 }
 
 type syntaxErrorListener struct {
@@ -50,6 +51,7 @@ func NewASTFormatter(cfg *config.Config) *ASTFormatter {
 		indentLevel:    0,
 		lastWasNewline: true,
 		needIndent:     false,
+		lineLength:     0,
 	}
 }
 
@@ -60,6 +62,7 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 	f.indentLevel = 0
 	f.lastWasNewline = true
 	f.needIndent = false
+	f.lineLength = 0
 
 	// Create ANTLR input stream
 	inputStream := antlr.NewInputStream(input)
@@ -89,22 +92,45 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 func (f *ASTFormatter) writeString(s string) {
 	if f.needIndent && !f.isWhitespace(s) {
 		f.writeIndent()
-		f.needIndent = false
 	}
 	f.output.WriteString(s)
-	f.lastWasNewline = strings.HasSuffix(s, "\n")
-	if f.lastWasNewline {
-		f.needIndent = true
+
+	if s == "" {
+		return
 	}
+
+	if strings.Contains(s, "\n") {
+		lastNewline := strings.LastIndex(s, "\n")
+		f.lineLength = len(s) - lastNewline - 1
+		f.lastWasNewline = strings.HasSuffix(s, "\n")
+		f.needIndent = f.lastWasNewline
+		return
+	}
+
+	f.lineLength += len(s)
+	f.lastWasNewline = false
 }
 
 // writeIndent writes the current indentation
 func (f *ASTFormatter) writeIndent() {
-	if f.config.Indent.UseSpaces {
-		f.output.WriteString(strings.Repeat(" ", f.indentLevel*f.config.Indent.Size))
-	} else {
-		f.output.WriteString(strings.Repeat("\t", f.indentLevel))
+	f.writeIndentLevel(f.indentLevel)
+}
+
+// writeIndentLevel writes indentation for a specific level
+func (f *ASTFormatter) writeIndentLevel(level int) {
+	if level < 0 {
+		level = 0
 	}
+	var indent string
+	if f.config.Indent.UseSpaces {
+		indent = strings.Repeat(" ", level*f.config.Indent.Size)
+	} else {
+		indent = strings.Repeat("\t", level)
+	}
+	f.output.WriteString(indent)
+	f.lineLength += len(indent)
+	f.lastWasNewline = false
+	f.needIndent = false
 }
 
 // writeNewline writes a newline character
@@ -112,11 +138,19 @@ func (f *ASTFormatter) writeNewline() {
 	f.output.WriteString("\n")
 	f.lastWasNewline = true
 	f.needIndent = true
+	f.lineLength = 0
 }
 
 // writeSpace writes a space if spacing is enabled
 func (f *ASTFormatter) writeSpace() {
+	if f.shouldWrap(1) {
+		f.writeNewline()
+		f.writeIndent()
+		return
+	}
 	f.output.WriteString(" ")
+	f.lineLength++
+	f.lastWasNewline = false
 }
 
 // writeSpaceIf writes a space conditionally
@@ -223,34 +257,92 @@ func (f *ASTFormatter) writeCloseBracket() {
 
 // writeBlockStart writes a block start with appropriate spacing and indentation
 func (f *ASTFormatter) writeBlockStart() {
+	baseIndent := f.indentLevel
+	braceIndent := baseIndent
+	statementIndent := baseIndent
+
 	switch f.config.Blocks.BraceStyle {
 	case "next_line":
 		f.writeNewline()
-		f.writeString("{")
 	case "same_line":
 		if f.config.Spacing.BeforeBlockStart {
 			f.writeSpace()
 		}
-		f.writeString("{")
+	case "gnu":
+		f.writeNewline()
+		braceIndent = baseIndent + 1
 	default: // default to same_line
 		if f.config.Spacing.BeforeBlockStart {
 			f.writeSpace()
 		}
+	}
+	if f.config.Blocks.BraceStyle == "gnu" {
+		f.writeIndentLevel(braceIndent)
+		f.writeString("{")
+	} else {
 		f.writeString("{")
 	}
 	f.writeNewline()
-	f.increaseIndent()
+
+	switch f.config.Blocks.BraceStyle {
+	case "gnu":
+		if f.config.Blocks.IndentStatements {
+			statementIndent = baseIndent + 2
+		} else {
+			statementIndent = baseIndent + 1
+		}
+	default:
+		if f.config.Blocks.IndentStatements {
+			statementIndent = baseIndent + 1
+		}
+	}
+	f.indentLevel = statementIndent
 }
 
 // writeBlockEnd writes a block end with appropriate indentation
 func (f *ASTFormatter) writeBlockEnd() {
-	f.decreaseIndent()
+	indentDelta := 0
+	switch f.config.Blocks.BraceStyle {
+	case "gnu":
+		if f.config.Blocks.IndentStatements {
+			indentDelta = 2
+		} else {
+			indentDelta = 1
+		}
+	default:
+		if f.config.Blocks.IndentStatements {
+			indentDelta = 1
+		}
+	}
+
+	parentIndent := f.indentLevel - indentDelta
+	if parentIndent < 0 {
+		parentIndent = 0
+	}
+	braceIndent := parentIndent
+	if f.config.Blocks.BraceStyle == "gnu" {
+		braceIndent = parentIndent + 1
+	}
+	f.indentLevel = parentIndent
 	f.ensureNewline()
-	f.writeIndent()
+	f.writeIndentLevel(braceIndent)
 	f.writeString("}")
 }
 
 // writeSemicolon writes a semicolon
 func (f *ASTFormatter) writeSemicolon() {
 	f.writeString(";")
+}
+
+func (f *ASTFormatter) shouldWrap(nextLen int) bool {
+	if !f.config.LineBreaks.BreakLongStatements {
+		return false
+	}
+	if f.config.LineBreaks.MaxLineLength <= 0 {
+		return false
+	}
+	if f.lastWasNewline || f.lineLength == 0 {
+		return false
+	}
+	return f.lineLength+nextLen > f.config.LineBreaks.MaxLineLength
 }
