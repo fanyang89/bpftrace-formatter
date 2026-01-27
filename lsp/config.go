@@ -153,7 +153,7 @@ func workspaceRootsFromParams(params *protocol.InitializeParams) []string {
 	}
 
 	if params.RootURI != nil {
-		if path, err := fileURIToPath(string(*params.RootURI)); err == nil {
+		if path, err := fileURIToPath(string(*params.RootURI)); err == nil && path != "" {
 			return []string{path}
 		}
 	}
