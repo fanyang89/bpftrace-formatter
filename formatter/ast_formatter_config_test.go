@@ -262,8 +262,30 @@ func TestASTFormatter_BreakLongStatements(t *testing.T) {
 
 	want := "BEGIN\n" +
 		"{\n" +
-		"    printf(\"x\", 1 + 2\n" +
-		"    + 3 + 4);\n" +
+		"    printf(\"x\", 1 +\n" +
+		"    2 + 3 + 4);\n" +
+		"}"
+
+	if got != want {
+		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, want)
+	}
+}
+
+func TestASTFormatter_BreakLongStatements_TokenAwareWrap(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.LineBreaks.MaxLineLength = 18
+	cfg.LineBreaks.BreakLongStatements = true
+
+	input := "BEGIN{printf(\"x\",1+2345);}"
+	got, err := NewASTFormatter(cfg).Format(input)
+	if err != nil {
+		t.Fatalf("Format returned error: %v", err)
+	}
+
+	want := "BEGIN\n" +
+		"{\n" +
+		"    printf(\"x\", 1\n" +
+		"    + 2345);\n" +
 		"}"
 
 	if got != want {

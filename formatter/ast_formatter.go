@@ -18,6 +18,7 @@ type ASTFormatter struct {
 	lastWasNewline bool
 	needIndent     bool
 	lineLength     int
+	pendingSpace   bool
 }
 
 type syntaxErrorListener struct {
@@ -52,6 +53,7 @@ func NewASTFormatter(cfg *config.Config) *ASTFormatter {
 		lastWasNewline: true,
 		needIndent:     false,
 		lineLength:     0,
+		pendingSpace:   false,
 	}
 }
 
@@ -63,6 +65,7 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 	f.lastWasNewline = true
 	f.needIndent = false
 	f.lineLength = 0
+	f.pendingSpace = false
 
 	// Create ANTLR input stream
 	inputStream := antlr.NewInputStream(input)
@@ -90,6 +93,27 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 
 // writeString writes a string to the output
 func (f *ASTFormatter) writeString(s string) {
+	if f.pendingSpace && !f.isWhitespace(s) {
+		if f.needIndent {
+			f.pendingSpace = false
+		} else {
+			tokenLen := len(s)
+			if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+				tokenLen = idx
+			}
+			if f.shouldWrap(1 + tokenLen) {
+				f.pendingSpace = false
+				f.writeNewline()
+			} else {
+				f.pendingSpace = false
+				f.output.WriteString(" ")
+				f.lineLength++
+				f.lastWasNewline = false
+				f.needIndent = false
+			}
+		}
+	}
+
 	if f.needIndent && !f.isWhitespace(s) {
 		f.writeIndent()
 	}
@@ -118,6 +142,7 @@ func (f *ASTFormatter) writeIndent() {
 
 // writeIndentLevel writes indentation for a specific level
 func (f *ASTFormatter) writeIndentLevel(level int) {
+	f.pendingSpace = false
 	if level < 0 {
 		level = 0
 	}
@@ -139,21 +164,16 @@ func (f *ASTFormatter) writeNewline() {
 	f.lastWasNewline = true
 	f.needIndent = true
 	f.lineLength = 0
+	f.pendingSpace = false
 }
 
 // writeSpace writes a space if spacing is enabled
 func (f *ASTFormatter) writeSpace() {
-	if f.shouldWrap(1) {
-		f.writeNewline()
-		f.writeIndent()
-		return
-	}
-	f.output.WriteString(" ")
-	f.lineLength++
-	f.lastWasNewline = false
+	f.pendingSpace = true
 }
 
 func (f *ASTFormatter) writeSpaceNoWrap() {
+	f.pendingSpace = false
 	f.output.WriteString(" ")
 	f.lineLength++
 	f.lastWasNewline = false
