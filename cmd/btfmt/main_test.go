@@ -81,6 +81,105 @@ func TestProcessFile_PreservesPermissions(t *testing.T) {
 	}
 }
 
+func TestWriteFilePreserveMode_Symlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target.bt")
+	link := filepath.Join(tmp, "link.bt")
+
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if err := writeFilePreserveMode(link, []byte("new")); err != nil {
+		t.Fatalf("writeFilePreserveMode: %v", err)
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink, got mode %v", info.Mode())
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(got) != "new" {
+		t.Fatalf("target content = %q, want %q", string(got), "new")
+	}
+}
+
+func TestWriteFilePreserveMode_HardLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hard link metadata is not reliable on Windows")
+	}
+
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target.bt")
+	link := filepath.Join(tmp, "link.bt")
+
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Link(target, link); err != nil {
+		t.Fatalf("hard link: %v", err)
+	}
+
+	if err := writeFilePreserveMode(link, []byte("new")); err != nil {
+		t.Fatalf("writeFilePreserveMode: %v", err)
+	}
+
+	gotTarget, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	gotLink, err := os.ReadFile(link)
+	if err != nil {
+		t.Fatalf("read link: %v", err)
+	}
+	if string(gotTarget) != "new" || string(gotLink) != "new" {
+		t.Fatalf("contents = %q/%q, want both %q", string(gotTarget), string(gotLink), "new")
+	}
+}
+
+func TestWriteFilePreserveMode_ReadOnlyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only semantics differ on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to read-only files")
+	}
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "readonly.bt")
+
+	if err := os.WriteFile(path, []byte("old"), 0o444); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	err := writeFilePreserveMode(path, []byte("new"))
+	if err == nil {
+		t.Fatal("expected error writing read-only file")
+	}
+
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read output: %v", readErr)
+	}
+	if string(got) != "old" {
+		t.Fatalf("content = %q, want %q", string(got), "old")
+	}
+}
+
 func TestProcessFile_ReadError(t *testing.T) {
 	cfg := config.DefaultConfig()
 	var stdout, stderr bytes.Buffer

@@ -89,6 +89,27 @@ func TestValidate_MaxLineLengthNegative(t *testing.T) {
 	}
 }
 
+func TestValidate_CommentIndentLevelNegative(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Comments.IndentLevel = -1
+
+	errors := cfg.Validate()
+	if len(errors) == 0 {
+		t.Fatal("expected validation error for negative comments.indent_level")
+	}
+
+	found := false
+	for _, err := range errors {
+		if strings.Contains(err.Error(), "comments.indent_level") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected error message to mention comments.indent_level")
+	}
+}
+
 func TestValidate_NegativeEmptyLinesBetweenProbes(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.LineBreaks.EmptyLinesBetweenProbes = -1

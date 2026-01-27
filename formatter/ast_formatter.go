@@ -88,7 +88,7 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 	visitor := NewASTVisitor(f)
 	visitor.Visit(tree)
 
-	return strings.TrimSpace(f.output.String()), nil
+	return strings.TrimRightFunc(f.output.String(), unicode.IsSpace), nil
 }
 
 // writeString writes a string to the output
