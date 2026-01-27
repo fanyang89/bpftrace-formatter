@@ -30,10 +30,10 @@ func (c *Config) Validate() []error {
 		))
 	}
 
-	// Validate max line length (minimum 40)
-	if c.LineBreaks.MaxLineLength < 40 {
+	// Validate max line length (non-negative)
+	if c.LineBreaks.MaxLineLength < 0 {
 		errors = append(errors, fmt.Errorf(
-			"line_breaks.max_line_length must be at least 40, got %d",
+			"line_breaks.max_line_length must be >= 0, got %d",
 			c.LineBreaks.MaxLineLength,
 		))
 	}

@@ -68,13 +68,13 @@ func TestValidate_IndentSizeTooLarge(t *testing.T) {
 	}
 }
 
-func TestValidate_MaxLineLengthTooSmall(t *testing.T) {
+func TestValidate_MaxLineLengthNegative(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.LineBreaks.MaxLineLength = 39
+	cfg.LineBreaks.MaxLineLength = -1
 
 	errors := cfg.Validate()
 	if len(errors) == 0 {
-		t.Fatal("expected validation error for max_line_length = 39")
+		t.Fatal("expected validation error for max_line_length = -1")
 	}
 
 	found := false
@@ -156,7 +156,7 @@ func TestValidate_MultipleErrors(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Blocks.BraceStyle = "invalid"
 	cfg.Indent.Size = 0
-	cfg.LineBreaks.MaxLineLength = 10
+	cfg.LineBreaks.MaxLineLength = -1
 
 	errors := cfg.Validate()
 	if len(errors) < 3 {
