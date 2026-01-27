@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/fanyang89/bpftrace-formatter/config"
@@ -115,6 +116,58 @@ func TestWriteFilePreserveMode_Symlink(t *testing.T) {
 	}
 	if string(got) != "new" {
 		t.Fatalf("target content = %q, want %q", string(got), "new")
+	}
+}
+
+func TestWriteFilePreserveMode_HardLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hard link metadata is not reliable on Windows")
+	}
+
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target.bt")
+	link := filepath.Join(tmp, "link.bt")
+
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Link(target, link); err != nil {
+		t.Fatalf("hard link: %v", err)
+	}
+
+	if err := writeFilePreserveMode(link, []byte("new")); err != nil {
+		t.Fatalf("writeFilePreserveMode: %v", err)
+	}
+
+	gotTarget, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	gotLink, err := os.ReadFile(link)
+	if err != nil {
+		t.Fatalf("read link: %v", err)
+	}
+	if string(gotTarget) != "new" || string(gotLink) != "new" {
+		t.Fatalf("contents = %q/%q, want both %q", string(gotTarget), string(gotLink), "new")
+	}
+
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat target: %v", err)
+	}
+	linkInfo, err := os.Stat(link)
+	if err != nil {
+		t.Fatalf("stat link: %v", err)
+	}
+	targetStat, okTarget := targetInfo.Sys().(*syscall.Stat_t)
+	linkStat, okLink := linkInfo.Sys().(*syscall.Stat_t)
+	if okTarget && okLink {
+		if targetStat.Ino != linkStat.Ino {
+			t.Fatalf("expected same inode, got %d and %d", targetStat.Ino, linkStat.Ino)
+		}
+		if targetStat.Nlink < 2 {
+			t.Fatalf("expected link count >= 2, got %d", targetStat.Nlink)
+		}
 	}
 }
 

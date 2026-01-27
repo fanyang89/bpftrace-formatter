@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/fanyang89/bpftrace-formatter/config"
 	"github.com/fanyang89/bpftrace-formatter/formatter"
@@ -200,7 +201,7 @@ func writeFilePreserveMode(filename string, data []byte) error {
 		return err
 	}
 
-	if info.Mode()&os.ModeSymlink != 0 {
+	if shouldWriteInPlace(info) {
 		return writeFileTruncate(filename, data)
 	}
 
@@ -253,6 +254,21 @@ func writeFilePreserveMode(filename string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+func shouldWriteInPlace(info os.FileInfo) bool {
+	if info == nil {
+		return false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		if stat.Nlink > 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func writeFileTruncate(filename string, data []byte) error {
