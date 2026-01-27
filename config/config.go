@@ -54,23 +54,18 @@ type LineBreakConfig struct {
 // CommentConfig controls comment formatting
 type CommentConfig struct {
 	PreserveInline bool `json:"preserve_inline"` // Keep inline comments on same line
-	AlignInline    bool `json:"align_inline"`    // Align inline comments
 	IndentLevel    int  `json:"indent_level"`    // Indent level for standalone comments
 }
 
 // ProbeConfig controls probe formatting
 type ProbeConfig struct {
 	AlignPredicates bool `json:"align_predicates"` // Align predicates with probe definitions
-	SortProbes      bool `json:"sort_probes"`      // Sort probes alphabetically
-	GroupByType     bool `json:"group_by_type"`    // Group probes by type (tracepoint, kprobe, etc.)
 }
 
 // BlockConfig controls block formatting
 type BlockConfig struct {
-	BraceStyle        string `json:"brace_style"`          // "same_line", "next_line", "gnu"
-	IndentStatements  bool   `json:"indent_statements"`    // Indent statements inside blocks
-	EmptyLineInBlocks bool   `json:"empty_line_in_blocks"` // Add empty lines in large blocks
-	AlignAssignments  bool   `json:"align_assignments"`    // Align assignment operators
+	BraceStyle       string `json:"brace_style"`       // "same_line", "next_line", "gnu"
+	IndentStatements bool   `json:"indent_statements"` // Indent statements inside blocks
 }
 
 // DefaultConfig returns the default configuration
@@ -96,19 +91,14 @@ func DefaultConfig() *Config {
 		},
 		Comments: CommentConfig{
 			PreserveInline: true,
-			AlignInline:    false,
 			IndentLevel:    0,
 		},
 		Probes: ProbeConfig{
 			AlignPredicates: false,
-			SortProbes:      false,
-			GroupByType:     false,
 		},
 		Blocks: BlockConfig{
-			BraceStyle:        "next_line",
-			IndentStatements:  true,
-			EmptyLineInBlocks: false,
-			AlignAssignments:  false,
+			BraceStyle:       "next_line",
+			IndentStatements: true,
 		},
 	}
 }

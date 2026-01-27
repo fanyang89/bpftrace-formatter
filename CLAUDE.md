@@ -119,21 +119,16 @@ The formatter loads configuration in this order:
 **Comments**:
 
 - `preserve_inline`: Keep inline comments on same line (default: true)
-- `align_inline`: Align inline comments (default: false)
 - `indent_level`: Indent level for standalone comments (default: 0)
 
 **Probes**:
 
 - `align_predicates`: Align predicates with probe definitions (default: false)
-- `sort_probes`: Sort probes alphabetically (default: false)
-- `group_by_type`: Group probes by type (default: false)
 
 **Blocks**:
 
 - `brace_style`: "same_line", "next_line", "gnu" (default: "next_line")
 - `indent_statements`: Indent statements inside blocks (default: true)
-- `empty_line_in_blocks`: Add empty lines in large blocks (default: false)
-- `align_assignments`: Align assignment operators (default: false)
 
 ## File Structure
 

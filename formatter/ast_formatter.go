@@ -37,10 +37,7 @@ func (l *syntaxErrorListener) Err() error {
 	if count == 0 {
 		return nil
 	}
-	if len(l.errors) == 0 {
-		return fmt.Errorf("parse failed with %d syntax error(s)", count)
-	}
-	if count == 1 && len(l.errors) == 1 {
+	if count == 1 {
 		return fmt.Errorf("parse failed: %w", l.errors[0])
 	}
 	return fmt.Errorf("parse failed with %d syntax error(s): %v", count, l.errors[0])
