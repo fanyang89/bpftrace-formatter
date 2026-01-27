@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/fanyang89/bpftrace-formatter/config"
@@ -138,7 +139,15 @@ func loadConfig(configFile string, verbose bool, stderr io.Writer) (*config.Conf
 	}
 
 	if verbose && configFile != "" {
-		fmt.Fprintf(stderr, "Using configuration file: %s\n", configFile)
+		configPath := configFile
+		if !filepath.IsAbs(configFile) && cwd != "" {
+			configPath = filepath.Join(cwd, configFile)
+		}
+		if _, err := os.Stat(configPath); err == nil {
+			fmt.Fprintf(stderr, "Using configuration file: %s\n", configPath)
+		} else {
+			fmt.Fprintf(stderr, "Warning: specified config file %s not found\n", configPath)
+		}
 	}
 
 	return cfg, nil
@@ -225,4 +234,3 @@ Configuration:
 
 `)
 }
-
