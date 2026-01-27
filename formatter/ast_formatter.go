@@ -153,6 +153,12 @@ func (f *ASTFormatter) writeSpace() {
 	f.lastWasNewline = false
 }
 
+func (f *ASTFormatter) writeSpaceNoWrap() {
+	f.output.WriteString(" ")
+	f.lineLength++
+	f.lastWasNewline = false
+}
+
 // writeSpaceIf writes a space conditionally
 func (f *ASTFormatter) writeSpaceIf(condition bool) {
 	if condition {

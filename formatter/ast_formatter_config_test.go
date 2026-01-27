@@ -184,6 +184,28 @@ func TestASTFormatter_PreserveInlineComments(t *testing.T) {
 	}
 }
 
+func TestASTFormatter_PreserveInlineCommentNoWrap(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Comments.PreserveInline = true
+	cfg.LineBreaks.MaxLineLength = 10
+	cfg.LineBreaks.BreakLongStatements = true
+
+	input := "BEGIN{printf(\"long\"); // note\n}"
+	got, err := NewASTFormatter(cfg).Format(input)
+	if err != nil {
+		t.Fatalf("Format returned error: %v", err)
+	}
+
+	want := "BEGIN\n" +
+		"{\n" +
+		"    printf(\"long\"); // note\n" +
+		"}"
+
+	if got != want {
+		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, want)
+	}
+}
+
 func TestASTFormatter_CommentIndentLevel(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Comments.IndentLevel = 1

@@ -705,7 +705,7 @@ func (v *ASTVisitor) visitComment(ctx *parser.CommentContext) {
 	commentText := ctx.GetText()
 	inline := v.formatter.config.Comments.PreserveInline && !v.formatter.lastWasNewline
 	if inline {
-		v.formatter.writeSpace()
+		v.formatter.writeSpaceNoWrap()
 		v.formatter.writeString(commentText)
 		v.formatter.writeNewline()
 		return
