@@ -138,13 +138,15 @@ func loadConfig(configFile string, verbose bool, stderr io.Writer) (*config.Conf
 		return nil, err
 	}
 
-	if verbose && configFile != "" {
+	if configFile != "" {
 		configPath := configFile
 		if !filepath.IsAbs(configFile) && cwd != "" {
 			configPath = filepath.Join(cwd, configFile)
 		}
 		if _, err := os.Stat(configPath); err == nil {
-			fmt.Fprintf(stderr, "Using configuration file: %s\n", configPath)
+			if verbose {
+				fmt.Fprintf(stderr, "Using configuration file: %s\n", configPath)
+			}
 		} else {
 			fmt.Fprintf(stderr, "Warning: specified config file %s not found\n", configPath)
 		}
@@ -172,11 +174,14 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 		return fmt.Errorf("formatting: %w", err)
 	}
 
+	if !strings.HasSuffix(formatted, "\n") {
+		formatted += "\n"
+	}
+
 	// Output result
 	if writeToFile {
-		// Write back to the original file
-		err = os.WriteFile(filename, []byte(formatted), 0644)
-		if err != nil {
+		// Write back to the original file without resetting permissions.
+		if err := writeFilePreserveMode(filename, []byte(formatted)); err != nil {
 			return fmt.Errorf("writing file: %w", err)
 		}
 		if verbose {
@@ -185,11 +190,28 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 	} else {
 		// Print to stdout
 		fmt.Fprint(stdout, formatted)
-		if !strings.HasSuffix(formatted, "\n") {
-			fmt.Fprintln(stdout)
-		}
 	}
 
+	return nil
+}
+
+func writeFilePreserveMode(filename string, data []byte) error {
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return err
+	}
+
+	n, err := file.Write(data)
+	if err == nil && n < len(data) {
+		err = io.ErrShortWrite
+	}
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
 	return nil
 }
 

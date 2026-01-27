@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -35,9 +36,48 @@ func TestProcessFile_WriteToFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Format returned error: %v", err)
 	}
+	if !strings.HasSuffix(want, "\n") {
+		want += "\n"
+	}
 
 	if string(gotBytes) != want {
 		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", string(gotBytes), want)
+	}
+}
+
+func TestProcessFile_PreservesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode preservation is not reliable on Windows")
+	}
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "perm.bt")
+
+	input := "BEGIN{printf(\"x\",1);}"
+	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	if err := os.Chmod(path, 0o751); err != nil {
+		t.Fatalf("chmod input: %v", err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat input: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	var stdout, stderr bytes.Buffer
+	if err := processFile(path, cfg, true, false, &stdout, &stderr); err != nil {
+		t.Fatalf("processFile returned error: %v", err)
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat output: %v", err)
+	}
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Fatalf("mode = %v, want %v", after.Mode().Perm(), before.Mode().Perm())
 	}
 }
 
@@ -265,6 +305,30 @@ func TestRun_InvalidConfig(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "brace_style") {
 		t.Errorf("expected error mentioning brace_style, got: %v", err)
+	}
+}
+
+func TestRun_MissingConfigWarns(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "missing.json")
+
+	testPath := filepath.Join(tmp, "test.bt")
+	input := "BEGIN{printf(\"test\");}"
+	if err := os.WriteFile(testPath, []byte(input), 0644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"btfmt", "-config", configPath, testPath}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	if !strings.Contains(stderr.String(), "Warning: specified config file") {
+		t.Fatalf("expected warning in stderr, got: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), configPath) {
+		t.Fatalf("expected warning to include path %q, got: %q", configPath, stderr.String())
 	}
 }
 

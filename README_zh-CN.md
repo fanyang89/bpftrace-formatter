@@ -87,6 +87,8 @@ tracepoint:syscalls:sys_enter_openat/pid==1234/ {
 3. 家目录中的 `~/.btfmt.json`
 4. 内置默认值
 
+如果通过 `-config` 指定的文件不存在，CLI 会给出警告，并直接使用内置默认值，不再继续搜索 `.btfmt.json`。
+
 配置使用 JSON，顶层包含以下字段：`indent`、`spacing`、
 `line_breaks`、`comments`、`probes`、`blocks`。
 

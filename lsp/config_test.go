@@ -130,6 +130,18 @@ func TestWorkspaceRootsFromParams_Fallbacks(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRootsFromParams_RootURINonFileFallsBackToRootPath(t *testing.T) {
+	rootPath := t.TempDir()
+	rootURI := protocol.DocumentUri("vscode-remote://ssh-remote+host/home/user")
+	params := &protocol.InitializeParams{RootURI: &rootURI, RootPath: &rootPath}
+
+	got := workspaceRootsFromParams(params)
+	want := []string{rootPath}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("workspaceRootsFromParams non-file rootURI = %#v, want %#v", got, want)
+	}
+}
+
 func TestConfigResolver_UsesMatchingWorkspaceRoot(t *testing.T) {
 	rootA := t.TempDir()
 	rootB := t.TempDir()
@@ -156,5 +168,23 @@ func TestConfigResolver_UsesMatchingWorkspaceRoot(t *testing.T) {
 	}
 	if cfg == nil || cfg.Indent.Size != 6 {
 		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, 6)
+	}
+}
+
+func TestConfigResolver_UsesWorkspaceRootWhenDocPathEmpty(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".btfmt.json"), []byte(`{"indent":{"size":2}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	resolver := NewConfigResolver()
+	resolver.SetWorkspaceRoots([]string{root})
+
+	cfg, err := resolver.ResolveForDocument("untitled:Untitled-1", "")
+	if err != nil {
+		t.Fatalf("ResolveForDocument: %v", err)
+	}
+	if cfg == nil || cfg.Indent.Size != 2 {
+		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, 2)
 	}
 }
