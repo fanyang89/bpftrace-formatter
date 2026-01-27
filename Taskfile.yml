@@ -1,31 +1,97 @@
 # https://taskfile.dev
 version: "3"
 
+vars:
+  BINARY: btfmt
+  GRAMMAR: bpftrace.g4
+
 tasks:
+  default:
+    desc: Show available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  # ─────────────────────────────────────────────────────────────
+  # Build & Development
+  # ─────────────────────────────────────────────────────────────
+
+  build:
+    desc: Build the btfmt binary
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BINARY}}"
+    cmds:
+      - go build -o {{.BINARY}} ./cmd/btfmt
+
   compile-grammar:
     desc: Compile ANTLR grammar
+    sources:
+      - "{{.GRAMMAR}}"
+    generates:
+      - parser/*.go
     cmds:
-      - uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser bpftrace.g4
+      - uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser {{.GRAMMAR}}
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -f {{.BINARY}}
+      - rm -f vscode-extension/*.vsix
+
+  # ─────────────────────────────────────────────────────────────
+  # Code Quality
+  # ─────────────────────────────────────────────────────────────
+
+  fmt:
+    desc: Format Go code
+    cmds:
+      - go fmt ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  check:
+    desc: Run all code quality checks (fmt, vet, lint)
+    cmds:
+      - task: fmt
+      - task: vet
+      - task: lint
+
+  # ─────────────────────────────────────────────────────────────
+  # Testing
+  # ─────────────────────────────────────────────────────────────
 
   test:
     desc: Run Go tests
     cmds:
       - go test ./...
 
+  test:verbose:
+    desc: Run Go tests with verbose output
+    cmds:
+      - go test -v ./...
+
+  test:cover:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
   test-tools:
     desc: Run tests against bpftrace/tools
     cmds:
-      - go test ./...
-
-  build:
-    desc: Build the btfmt binary
-    cmds:
-      - go build ./cmd/btfmt
-
-  fmt:
-    desc: Format Go code
-    cmds:
-      - go fmt ./...
+      - go test ./formatter -run TestASTFormatter_FormatsBpftraceToolsTree
 
   lsp-smoke:
     desc: Smoke test for btfmt LSP (stdio)
@@ -34,32 +100,53 @@ tasks:
     cmds:
       - python3 scripts/lsp_smoke.py
 
-  vscode-install:
+  # ─────────────────────────────────────────────────────────────
+  # VS Code Extension
+  # ─────────────────────────────────────────────────────────────
+
+  vscode:install:
     desc: Install dependencies for the VS Code extension
     dir: vscode-extension
     cmds:
       - npm install
 
-  vscode-build:
+  vscode:build:
     desc: Build the VS Code extension
     dir: vscode-extension
     deps:
-      - vscode-install
+      - vscode:install
     cmds:
       - npm run compile
 
-  vscode-package:
+  vscode:package:
     desc: Package the VS Code extension (vsix)
     dir: vscode-extension
     deps:
-      - vscode-build
+      - vscode:build
     cmds:
       - npx vsce package
 
-  vscode-publish:
+  vscode:publish:
     desc: Publish the VS Code extension (requires VSCE_PAT)
     dir: vscode-extension
     deps:
-      - vscode-build
+      - vscode:build
     cmds:
       - npx vsce publish
+
+  # ─────────────────────────────────────────────────────────────
+  # CI / Release
+  # ─────────────────────────────────────────────────────────────
+
+  ci:
+    desc: Run all CI checks (format, vet, test)
+    cmds:
+      - task: fmt
+      - task: vet
+      - task: test
+
+  all:
+    desc: Build and test everything
+    cmds:
+      - task: build
+      - task: test

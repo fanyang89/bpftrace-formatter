@@ -10,22 +10,9 @@ import (
 )
 
 func TestASTFormatter_FormatsBpftraceToolsTree(t *testing.T) {
-	root := os.Getenv("BPFTRACE_TOOLS_DIR")
-	if root != "" && !filepath.IsAbs(root) {
-		if !dirExists(root) {
-			alt := filepath.Join("..", root)
-			if dirExists(alt) {
-				root = alt
-			}
-		}
-	}
-	if root == "" {
-		toolsDir := filepath.Join("..", "bpftrace", "tools")
-		if dirExists(toolsDir) {
-			root = toolsDir
-		} else {
-			root = filepath.Join("..", "testdata", "bpftrace-tools")
-		}
+	root := filepath.Join("..", "bpftrace", "tools")
+	if !dirExists(root) {
+		t.Skip("bpftrace/tools not found")
 	}
 
 	files, err := collectBtFiles(root)
