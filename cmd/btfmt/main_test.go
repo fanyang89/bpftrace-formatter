@@ -81,6 +81,43 @@ func TestProcessFile_PreservesPermissions(t *testing.T) {
 	}
 }
 
+func TestWriteFilePreserveMode_Symlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target.bt")
+	link := filepath.Join(tmp, "link.bt")
+
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if err := writeFilePreserveMode(link, []byte("new")); err != nil {
+		t.Fatalf("writeFilePreserveMode: %v", err)
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink, got mode %v", info.Mode())
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(got) != "new" {
+		t.Fatalf("target content = %q, want %q", string(got), "new")
+	}
+}
+
 func TestProcessFile_ReadError(t *testing.T) {
 	cfg := config.DefaultConfig()
 	var stdout, stderr bytes.Buffer

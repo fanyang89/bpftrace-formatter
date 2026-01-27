@@ -195,9 +195,13 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 }
 
 func writeFilePreserveMode(filename string, data []byte) error {
-	info, err := os.Stat(filename)
+	info, err := os.Lstat(filename)
 	if err != nil {
 		return err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		return writeFileTruncate(filename, data)
 	}
 
 	dir := filepath.Dir(filename)
@@ -247,6 +251,26 @@ func writeFilePreserveMode(filename string, data []byte) error {
 		}
 		_ = os.Remove(tempName)
 		return err
+	}
+	return nil
+}
+
+func writeFileTruncate(filename string, data []byte) error {
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return err
+	}
+
+	n, err := file.Write(data)
+	if err == nil && n < len(data) {
+		err = io.ErrShortWrite
+	}
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	return nil
 }
