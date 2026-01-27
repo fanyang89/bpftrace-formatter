@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -38,6 +39,42 @@ func TestProcessFile_WriteToFile(t *testing.T) {
 
 	if string(gotBytes) != want {
 		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", string(gotBytes), want)
+	}
+}
+
+func TestProcessFile_PreservesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode preservation is not reliable on Windows")
+	}
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "perm.bt")
+
+	input := "BEGIN{printf(\"x\",1);}"
+	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	if err := os.Chmod(path, 0o751); err != nil {
+		t.Fatalf("chmod input: %v", err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat input: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	var stdout, stderr bytes.Buffer
+	if err := processFile(path, cfg, true, false, &stdout, &stderr); err != nil {
+		t.Fatalf("processFile returned error: %v", err)
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat output: %v", err)
+	}
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Fatalf("mode = %v, want %v", after.Mode().Perm(), before.Mode().Perm())
 	}
 }
 

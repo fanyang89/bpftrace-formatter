@@ -174,9 +174,8 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 
 	// Output result
 	if writeToFile {
-		// Write back to the original file
-		err = os.WriteFile(filename, []byte(formatted), 0644)
-		if err != nil {
+		// Write back to the original file without resetting permissions.
+		if err := writeFilePreserveMode(filename, []byte(formatted)); err != nil {
 			return fmt.Errorf("writing file: %w", err)
 		}
 		if verbose {
@@ -190,6 +189,26 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 		}
 	}
 
+	return nil
+}
+
+func writeFilePreserveMode(filename string, data []byte) error {
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return err
+	}
+
+	n, err := file.Write(data)
+	if err == nil && n < len(data) {
+		err = io.ErrShortWrite
+	}
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
 	return nil
 }
 
