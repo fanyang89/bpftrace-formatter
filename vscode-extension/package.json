@@ -4,6 +4,9 @@
   "description": "bpftrace formatter LSP client for VS Code",
   "version": "0.0.1",
   "publisher": "local",
+  "repository": {
+    "url": "https://github.com/fanyang89/bpftrace-formatter.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -20,8 +23,12 @@
     "languages": [
       {
         "id": "bpftrace",
-        "aliases": ["bpftrace"],
-        "extensions": [".bt"],
+        "aliases": [
+          "bpftrace"
+        ],
+        "extensions": [
+          ".bt"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
