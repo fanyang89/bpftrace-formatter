@@ -262,10 +262,11 @@ func shouldWriteInPlace(info os.FileInfo) bool {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return true
 	}
-	if nlink, ok := fileLinkCount(info); ok && nlink > 1 {
+	nlink, ok := fileLinkCount(info)
+	if !ok {
 		return true
 	}
-	return false
+	return nlink > 1
 }
 
 func writeFileTruncate(filename string, data []byte) error {
