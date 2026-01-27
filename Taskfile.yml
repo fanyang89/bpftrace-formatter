@@ -153,6 +153,6 @@ tasks:
 
   gh-review:
     desc: Notify bot to review on the current PR
-      cmds:
-        - gh pr comment --body "@codex review"
-        - gh pr comment --body "@gemini-code-assist review"
+    cmds:
+      - gh pr comment --body "@codex review"
+      - gh pr comment --body "@gemini-code-assist review"
