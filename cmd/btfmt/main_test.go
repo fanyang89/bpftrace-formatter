@@ -308,6 +308,30 @@ func TestRun_InvalidConfig(t *testing.T) {
 	}
 }
 
+func TestRun_MissingConfigWarns(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "missing.json")
+
+	testPath := filepath.Join(tmp, "test.bt")
+	input := "BEGIN{printf(\"test\");}"
+	if err := os.WriteFile(testPath, []byte(input), 0644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"btfmt", "-config", configPath, testPath}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	if !strings.Contains(stderr.String(), "Warning: specified config file") {
+		t.Fatalf("expected warning in stderr, got: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), configPath) {
+		t.Fatalf("expected warning to include path %q, got: %q", configPath, stderr.String())
+	}
+}
+
 func TestRun_InPlaceFlag(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "test.bt")

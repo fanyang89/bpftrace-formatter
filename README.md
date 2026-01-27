@@ -86,6 +86,8 @@ The formatter loads configuration in the following order:
 3. `~/.btfmt.json`
 4. Built-in defaults
 
+If `-config` is set but the file does not exist, the CLI warns and uses built-in defaults without searching for `.btfmt.json`.
+
 ### LSP configuration resolution
 
 When running `btfmt lsp`, configuration is resolved per document using:

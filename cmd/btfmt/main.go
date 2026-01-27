@@ -138,13 +138,15 @@ func loadConfig(configFile string, verbose bool, stderr io.Writer) (*config.Conf
 		return nil, err
 	}
 
-	if verbose && configFile != "" {
+	if configFile != "" {
 		configPath := configFile
 		if !filepath.IsAbs(configFile) && cwd != "" {
 			configPath = filepath.Join(cwd, configFile)
 		}
 		if _, err := os.Stat(configPath); err == nil {
-			fmt.Fprintf(stderr, "Using configuration file: %s\n", configPath)
+			if verbose {
+				fmt.Fprintf(stderr, "Using configuration file: %s\n", configPath)
+			}
 		} else {
 			fmt.Fprintf(stderr, "Warning: specified config file %s not found\n", configPath)
 		}
