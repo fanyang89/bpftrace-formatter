@@ -172,6 +172,10 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 		return fmt.Errorf("formatting: %w", err)
 	}
 
+	if !strings.HasSuffix(formatted, "\n") {
+		formatted += "\n"
+	}
+
 	// Output result
 	if writeToFile {
 		// Write back to the original file without resetting permissions.
@@ -184,9 +188,6 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 	} else {
 		// Print to stdout
 		fmt.Fprint(stdout, formatted)
-		if !strings.HasSuffix(formatted, "\n") {
-			fmt.Fprintln(stdout)
-		}
 	}
 
 	return nil

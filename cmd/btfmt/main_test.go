@@ -36,6 +36,9 @@ func TestProcessFile_WriteToFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Format returned error: %v", err)
 	}
+	if !strings.HasSuffix(want, "\n") {
+		want += "\n"
+	}
 
 	if string(gotBytes) != want {
 		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", string(gotBytes), want)
