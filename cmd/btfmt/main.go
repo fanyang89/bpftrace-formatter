@@ -263,6 +263,9 @@ func shouldWriteInPlace(info os.FileInfo) bool {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return true
 	}
+	if mismatch, ok := fileOwnerMismatch(info); ok && mismatch {
+		return true
+	}
 	nlink, ok := fileLinkCount(info)
 	if !ok {
 		return true
