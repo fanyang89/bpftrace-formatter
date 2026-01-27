@@ -374,7 +374,7 @@ func (v *ASTVisitor) visitProbeDef(ctx *parser.Probe_defContext) {
 func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
 	if v.formatter.config.Probes.AlignPredicates {
 		if !v.formatter.lastWasNewline {
-			v.formatter.writeSpace()
+			v.formatter.writeSpaceNoWrap()
 		}
 	} else {
 		v.formatter.writeNewline()

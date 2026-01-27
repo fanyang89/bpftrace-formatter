@@ -164,6 +164,28 @@ func TestASTFormatter_AlignPredicates(t *testing.T) {
 	}
 }
 
+func TestASTFormatter_AlignPredicatesNoWrap(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Probes.AlignPredicates = true
+	cfg.LineBreaks.MaxLineLength = 10
+	cfg.LineBreaks.BreakLongStatements = true
+
+	input := "tracepoint:syscalls:sys_enter_openat/pid/{exit();}"
+	got, err := NewASTFormatter(cfg).Format(input)
+	if err != nil {
+		t.Fatalf("Format returned error: %v", err)
+	}
+
+	want := "tracepoint:syscalls:sys_enter_openat / pid /\n" +
+		"{\n" +
+		"    exit();\n" +
+		"}"
+
+	if got != want {
+		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, want)
+	}
+}
+
 func TestASTFormatter_PreserveInlineComments(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Comments.PreserveInline = true
