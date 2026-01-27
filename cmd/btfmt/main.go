@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 
 	"github.com/fanyang89/bpftrace-formatter/config"
 	"github.com/fanyang89/bpftrace-formatter/formatter"
