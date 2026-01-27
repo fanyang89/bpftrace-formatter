@@ -208,7 +208,7 @@ func writeFilePreserveMode(filename string, data []byte) error {
 	base := filepath.Base(filename)
 	tempFile, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
-		return err
+		return writeFileTruncate(filename, data)
 	}
 	tempName := tempFile.Name()
 
@@ -230,7 +230,8 @@ func writeFilePreserveMode(filename string, data []byte) error {
 		cleanup()
 		return err
 	}
-	if err := tempFile.Chmod(info.Mode().Perm()); err != nil {
+	mode := info.Mode().Perm() | (info.Mode() & (os.ModeSetuid | os.ModeSetgid | os.ModeSticky))
+	if err := tempFile.Chmod(mode); err != nil {
 		cleanup()
 		return err
 	}
