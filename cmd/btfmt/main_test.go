@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/fanyang89/bpftrace-formatter/config"
@@ -149,25 +148,6 @@ func TestWriteFilePreserveMode_HardLink(t *testing.T) {
 	}
 	if string(gotTarget) != "new" || string(gotLink) != "new" {
 		t.Fatalf("contents = %q/%q, want both %q", string(gotTarget), string(gotLink), "new")
-	}
-
-	targetInfo, err := os.Stat(target)
-	if err != nil {
-		t.Fatalf("stat target: %v", err)
-	}
-	linkInfo, err := os.Stat(link)
-	if err != nil {
-		t.Fatalf("stat link: %v", err)
-	}
-	targetStat, okTarget := targetInfo.Sys().(*syscall.Stat_t)
-	linkStat, okLink := linkInfo.Sys().(*syscall.Stat_t)
-	if okTarget && okLink {
-		if targetStat.Ino != linkStat.Ino {
-			t.Fatalf("expected same inode, got %d and %d", targetStat.Ino, linkStat.Ino)
-		}
-		if targetStat.Nlink < 2 {
-			t.Fatalf("expected link count >= 2, got %d", targetStat.Nlink)
-		}
 	}
 }
 

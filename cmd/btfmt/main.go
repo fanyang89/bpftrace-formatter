@@ -263,10 +263,8 @@ func shouldWriteInPlace(info os.FileInfo) bool {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return true
 	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		if stat.Nlink > 1 {
-			return true
-		}
+	if nlink, ok := fileLinkCount(info); ok && nlink > 1 {
+		return true
 	}
 	return false
 }
