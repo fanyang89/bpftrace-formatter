@@ -25,7 +25,8 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   client = new LanguageClient('btfmt', 'btfmt LSP', serverOptions, clientOptions);
-  context.subscriptions.push(client.start());
+  void client.start();
+  context.subscriptions.push(client);
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
