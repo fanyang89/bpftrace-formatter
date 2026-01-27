@@ -1,0 +1,3 @@
+[submodule "third_party/kutil"]
+	path = third_party/kutil
+	url = https://github.com/fanyang89/go-kutil
