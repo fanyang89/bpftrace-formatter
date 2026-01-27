@@ -47,6 +47,11 @@ func (cl *ConfigLoader) LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
 	}
 
+	// Validate configuration
+	if validationErrors := config.Validate(); len(validationErrors) > 0 {
+		return nil, fmt.Errorf("invalid configuration in %s: %v", configPath, validationErrors[0])
+	}
+
 	return config, nil
 }
 
@@ -66,6 +71,9 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 			if err != nil {
 				return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
 			}
+			if validationErrors := config.Validate(); len(validationErrors) > 0 {
+				return nil, fmt.Errorf("invalid configuration in %s: %v", configPath, validationErrors[0])
+			}
 			return config, nil
 		}
 		if verbose {
@@ -83,6 +91,9 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 			if err != nil {
 				return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
 			}
+			if validationErrors := config.Validate(); len(validationErrors) > 0 {
+				return nil, fmt.Errorf("invalid configuration in %s: %v", configPath, validationErrors[0])
+			}
 			return config, nil
 		}
 	}
@@ -97,6 +108,9 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 			config, err := LoadConfig(homeConfig)
 			if err != nil {
 				return nil, fmt.Errorf("failed to load config from %s: %w", homeConfig, err)
+			}
+			if validationErrors := config.Validate(); len(validationErrors) > 0 {
+				return nil, fmt.Errorf("invalid configuration in %s: %v", homeConfig, validationErrors[0])
 			}
 			return config, nil
 		}
