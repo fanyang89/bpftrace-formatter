@@ -249,6 +249,27 @@ func TestASTFormatter_CommentIndentLevel(t *testing.T) {
 	}
 }
 
+func TestASTFormatter_LeadingCommentIndentPreserved(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Comments.IndentLevel = 1
+
+	input := "// hello\nBEGIN{exit();}"
+	got, err := NewASTFormatter(cfg).Format(input)
+	if err != nil {
+		t.Fatalf("Format returned error: %v", err)
+	}
+
+	want := "    // hello\n" +
+		"BEGIN\n" +
+		"{\n" +
+		"    exit();\n" +
+		"}"
+
+	if got != want {
+		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, want)
+	}
+}
+
 func TestASTFormatter_BreakLongStatements(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.LineBreaks.MaxLineLength = 20

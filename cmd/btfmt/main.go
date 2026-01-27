@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/fanyang89/bpftrace-formatter/config"
@@ -41,6 +42,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	opts, err := parseFlags(args)
 	if err != nil {
+		printUsageTo(stderr)
 		return err
 	}
 
@@ -133,23 +135,20 @@ func loadConfig(configFile string, verbose bool, stderr io.Writer) (*config.Conf
 		cwd = ""
 	}
 
-	cfg, err := config.LoadConfigFrom(cwd, configFile, false)
-	if err != nil {
-		return nil, err
-	}
-
 	if configFile != "" {
 		configPath := configFile
 		if !filepath.IsAbs(configFile) && cwd != "" {
 			configPath = filepath.Join(cwd, configFile)
 		}
-		if _, err := os.Stat(configPath); err == nil {
-			if verbose {
-				fmt.Fprintf(stderr, "Using configuration file: %s\n", configPath)
-			}
-		} else {
+		if _, err := os.Stat(configPath); err != nil {
 			fmt.Fprintf(stderr, "Warning: specified config file %s not found\n", configPath)
+			return config.DefaultConfig(), nil
 		}
+	}
+
+	cfg, err := config.LoadConfigFromWithLogger(cwd, configFile, verbose, stderr)
+	if err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
@@ -196,21 +195,58 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 }
 
 func writeFilePreserveMode(filename string, data []byte) error {
-	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC, 0)
+	info, err := os.Stat(filename)
 	if err != nil {
 		return err
 	}
 
-	n, err := file.Write(data)
-	if err == nil && n < len(data) {
-		err = io.ErrShortWrite
-	}
-	closeErr := file.Close()
+	dir := filepath.Dir(filename)
+	base := filepath.Base(filename)
+	tempFile, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
 		return err
 	}
-	if closeErr != nil {
-		return closeErr
+	tempName := tempFile.Name()
+
+	cleanup := func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempName)
+	}
+
+	n, err := tempFile.Write(data)
+	if err == nil && n < len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		cleanup()
+		return err
+	}
+
+	if err := tempFile.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tempFile.Chmod(info.Mode().Perm()); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempName)
+		return err
+	}
+
+	if err := os.Rename(tempName, filename); err != nil {
+		if runtime.GOOS == "windows" {
+			if removeErr := os.Remove(filename); removeErr == nil {
+				if renameErr := os.Rename(tempName, filename); renameErr == nil {
+					return nil
+				} else {
+					err = renameErr
+				}
+			}
+		}
+		_ = os.Remove(tempName)
+		return err
 	}
 	return nil
 }

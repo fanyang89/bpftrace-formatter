@@ -30,6 +30,14 @@ func (c *Config) Validate() []error {
 		))
 	}
 
+	// Validate comment indent level (non-negative)
+	if c.Comments.IndentLevel < 0 {
+		errors = append(errors, fmt.Errorf(
+			"comments.indent_level must be >= 0, got %d",
+			c.Comments.IndentLevel,
+		))
+	}
+
 	// Validate max line length (non-negative)
 	if c.LineBreaks.MaxLineLength < 0 {
 		errors = append(errors, fmt.Errorf(

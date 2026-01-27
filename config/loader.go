@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -58,6 +59,15 @@ func (cl *ConfigLoader) LoadConfig() (*Config, error) {
 // LoadConfigFrom loads configuration relative to baseDir, using explicitPath if provided.
 // If explicitPath is set but missing, defaults are returned without searching.
 func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error) {
+	return LoadConfigFromWithLogger(baseDir, explicitPath, verbose, os.Stdout)
+}
+
+// LoadConfigFromWithLogger loads configuration with optional verbose logging to logWriter.
+func LoadConfigFromWithLogger(baseDir, explicitPath string, verbose bool, logWriter io.Writer) (*Config, error) {
+	if logWriter == nil {
+		logWriter = io.Discard
+	}
+
 	if explicitPath != "" {
 		configPath := explicitPath
 		if !filepath.IsAbs(explicitPath) && baseDir != "" {
@@ -65,7 +75,7 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 		}
 		if _, err := os.Stat(configPath); err == nil {
 			if verbose {
-				fmt.Printf("Loading configuration from: %s\n", configPath)
+				fmt.Fprintf(logWriter, "Loading configuration from: %s\n", configPath)
 			}
 			config, err := LoadConfig(configPath)
 			if err != nil {
@@ -77,7 +87,7 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 			return config, nil
 		}
 		if verbose {
-			fmt.Printf("Warning: specified config file %s not found\n", configPath)
+			fmt.Fprintf(logWriter, "Warning: specified config file %s not found\n", configPath)
 		}
 		return DefaultConfig(), nil
 	}
@@ -85,7 +95,7 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 	if baseDir != "" {
 		if configPath := searchUpwards(baseDir, ".btfmt.json"); configPath != "" {
 			if verbose {
-				fmt.Printf("Loading configuration from: %s\n", configPath)
+				fmt.Fprintf(logWriter, "Loading configuration from: %s\n", configPath)
 			}
 			config, err := LoadConfig(configPath)
 			if err != nil {
@@ -103,7 +113,7 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 		homeConfig := filepath.Join(homeDir, ".btfmt.json")
 		if _, err := os.Stat(homeConfig); err == nil {
 			if verbose {
-				fmt.Printf("Loading configuration from: %s\n", homeConfig)
+				fmt.Fprintf(logWriter, "Loading configuration from: %s\n", homeConfig)
 			}
 			config, err := LoadConfig(homeConfig)
 			if err != nil {
@@ -117,7 +127,7 @@ func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error)
 	}
 
 	if verbose {
-		fmt.Println("No configuration file found, using defaults")
+		fmt.Fprintln(logWriter, "No configuration file found, using defaults")
 	}
 	return DefaultConfig(), nil
 }
