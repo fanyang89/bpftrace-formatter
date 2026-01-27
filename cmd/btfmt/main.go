@@ -204,6 +204,10 @@ func writeFilePreserveMode(filename string, data []byte) error {
 		return writeFileTruncate(filename, data)
 	}
 
+	if err := ensureWritable(filename); err != nil {
+		return err
+	}
+
 	dir := filepath.Dir(filename)
 	base := filepath.Base(filename)
 	tempFile, err := os.CreateTemp(dir, base+".tmp-*")
@@ -254,6 +258,14 @@ func writeFilePreserveMode(filename string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+func ensureWritable(filename string) error {
+	file, err := os.OpenFile(filename, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	return file.Close()
 }
 
 func shouldWriteInPlace(info os.FileInfo) bool {

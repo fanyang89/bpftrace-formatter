@@ -151,6 +151,35 @@ func TestWriteFilePreserveMode_HardLink(t *testing.T) {
 	}
 }
 
+func TestWriteFilePreserveMode_ReadOnlyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only semantics differ on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to read-only files")
+	}
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "readonly.bt")
+
+	if err := os.WriteFile(path, []byte("old"), 0o444); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	err := writeFilePreserveMode(path, []byte("new"))
+	if err == nil {
+		t.Fatal("expected error writing read-only file")
+	}
+
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read output: %v", readErr)
+	}
+	if string(got) != "old" {
+		t.Fatalf("content = %q, want %q", string(got), "old")
+	}
+}
+
 func TestProcessFile_ReadError(t *testing.T) {
 	cfg := config.DefaultConfig()
 	var stdout, stderr bytes.Buffer
