@@ -14,6 +14,9 @@ import (
 	"github.com/fanyang89/bpftrace-formatter/lsp"
 )
 
+// version is set at build time via ldflags
+var version = "dev"
+
 // runOptions holds the parsed command line options
 type runOptions struct {
 	generateConfig bool
@@ -23,6 +26,7 @@ type runOptions struct {
 	write          bool
 	verbose        bool
 	help           bool
+	showVersion    bool
 	files          []string
 }
 
@@ -49,6 +53,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// Handle help
 	if opts.help {
 		printUsageTo(stdout)
+		return nil
+	}
+
+	// Handle version
+	if opts.showVersion {
+		fmt.Fprintf(stdout, "btfmt version %s\n", version)
 		return nil
 	}
 
@@ -119,6 +129,7 @@ func parseFlags(args []string) (*runOptions, error) {
 	fs.BoolVar(&opts.verbose, "verbose", false, "Enable verbose output")
 	fs.BoolVar(&opts.verbose, "v", false, "Enable verbose output (short form)")
 	fs.BoolVar(&opts.help, "help", false, "Show help message")
+	fs.BoolVar(&opts.showVersion, "version", false, "Show version information")
 
 	if err := fs.Parse(args[1:]); err != nil {
 		return nil, err
@@ -319,6 +330,7 @@ Options:
   -v, -verbose           Enable verbose output
   -generate-config       Generate default configuration file
   -config-output <file>  Output path for generated config (default: .btfmt.json)
+  -version               Show version information
   -help                  Show this help message
 
 Examples:

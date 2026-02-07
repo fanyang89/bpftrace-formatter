@@ -1,107 +1,130 @@
-# BPFTrace Formatter
+# btfmt
 
-A Go tool for formatting bpftrace scripts using an ANTLR-generated parser and an AST visitor.
+[English](README.md) | [中文](README_zh-CN.md)
+
+A formatter for bpftrace scripts with VS Code integration.
 
 ## Features
 
-- Grammar-based parsing and formatting for bpftrace scripts
-- Consistent indentation, spacing, and line breaks
+- Format bpftrace scripts with consistent indentation, spacing, and structure
+- VS Code extension with bundled binary - install and use immediately
+- Language Server Protocol (LSP) support for editor integration
+- Configurable formatting rules via JSON configuration file
 - Preserves comments and shebangs
-- Configurable formatting options via JSON
-- CLI supports formatting multiple files and in-place edits
 
-## Build
+## Installation
 
-### From source
+### VS Code Extension (Recommended)
+
+Install the `btfmt-lsp` extension from the [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) page:
+
+1. Download the `.vsix` file for your platform (e.g., `btfmt-lsp-0.0.2@linux-x64.vsix`)
+2. In VS Code, press `Ctrl+Shift+P` and run "Extensions: Install from VSIX..."
+3. Select the downloaded file
+
+The extension includes the btfmt binary - no additional installation required.
+
+### CLI Binary
+
+Download the pre-built binary from [Releases](https://github.com/fanyang89/bpftrace-formatter/releases):
+
+| Platform      | File                        |
+| ------------- | --------------------------- |
+| Linux x64     | `btfmt-linux-amd64.tar.gz`  |
+| Linux ARM64   | `btfmt-linux-arm64.tar.gz`  |
+| macOS x64     | `btfmt-darwin-amd64.tar.gz` |
+| macOS ARM64   | `btfmt-darwin-arm64.tar.gz` |
+| Windows x64   | `btfmt-windows-amd64.zip`   |
+| Windows ARM64 | `btfmt-windows-arm64.zip`   |
+
+Extract and add to your PATH:
 
 ```bash
-go mod tidy
-go build ./cmd/btfmt
+tar -xzf btfmt-linux-amd64.tar.gz
+sudo mv btfmt /usr/local/bin/
 ```
 
-### Taskfile
+### Build from Source
 
 ```bash
-task build
+go install github.com/fanyang89/bpftrace-formatter/cmd/btfmt@latest
+```
+
+Or clone and build:
+
+```bash
+git clone https://github.com/fanyang89/bpftrace-formatter.git
+cd bpftrace-formatter
+go build ./cmd/btfmt
 ```
 
 ## Usage
 
-### Basic usage
+### Format a file
 
 ```bash
-./btfmt <file.bt>
+btfmt script.bt          # Print formatted output to stdout
+btfmt -w script.bt       # Write result back to file
+btfmt -w *.bt            # Format multiple files
 ```
 
-### Format in place
+### Example
 
-```bash
-./btfmt -i script.bt
+Before:
+
+```bpftrace
+#!/usr/bin/env bpftrace
+tracepoint:syscalls:sys_enter_openat{printf("openat: %s\n",str(args.filename));}
+tracepoint:syscalls:sys_enter_openat/pid==1234/{@opens[pid]=count();}
 ```
 
-### Format multiple files
+After:
 
-```bash
-./btfmt -w file1.bt file2.bt
+```bpftrace
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_openat
+{
+    printf("openat: %s\n", str(args.filename));
+}
+
+tracepoint:syscalls:sys_enter_openat /pid == 1234/
+{
+    @opens[pid] = count();
+}
 ```
 
-### Generate a default configuration
+### CLI Options
 
-```bash
-./btfmt -generate-config
 ```
+btfmt [options] <file.bt> [file2.bt ...]
 
-### Use a custom configuration
-
-```bash
-./btfmt -config .btfmt.json script.bt
+Options:
+  -w                     Write result to source file
+  -i                     Edit files in place (same as -w)
+  -c, -config <file>     Path to configuration file
+  -v, -verbose           Enable verbose output
+  -generate-config       Generate default configuration file
+  -version               Show version information
+  -help                  Show help message
 ```
-
-### Options
-
-- `-c`, `-config <file>`: Path to configuration file
-- `-i`: Edit files in place
-- `-w`: Write result to source file instead of stdout
-- `-v`, `-verbose`: Enable verbose output
-- `-generate-config`: Generate default configuration file
-- `-config-output <file>`: Output path for generated config (default: .btfmt.json)
-- `-help`: Show help message
-
-### Language Server (LSP)
-
-Run the formatter as an LSP server:
-
-```bash
-btfmt lsp
-```
-
-The server communicates over stdio (LSP JSON-RPC). Your client/editor must handle JSON-RPC framing (for example, `Content-Length` headers).
 
 ## Configuration
 
-The formatter loads configuration in the following order:
+btfmt looks for configuration in this order:
 
-1. File specified with `-config`
-2. `.btfmt.json` in the current directory or parent directories
-3. `~/.btfmt.json`
+1. File specified with `-config` flag
+2. `.btfmt.json` in current directory or parent directories
+3. `~/.btfmt.json` in home directory
 4. Built-in defaults
 
-If `-config` is set but the file does not exist, the CLI warns and uses built-in defaults without searching for `.btfmt.json`.
+Generate a default configuration file:
 
-### LSP configuration resolution
+```bash
+btfmt -generate-config
+```
 
-When running `btfmt lsp`, configuration is resolved per document using:
-
-1. `btfmt.configPath` from client settings, if set and the file exists
-2. `.btfmt.json` in the workspace root (or the document directory if no workspace root is provided), searching parent directories up to the filesystem root
-3. `~/.btfmt.json`
-4. Built-in defaults
-
-If `btfmt.configPath` is set but the file does not exist, the server uses built-in defaults and does not fall back to searching for `.btfmt.json`.
-
-Client-provided settings (everything under `btfmt` except `configPath`) are merged on top of the resolved file config; client settings take precedence.
-
-A minimal example configuration:
+Example `.btfmt.json`:
 
 ```json
 {
@@ -109,83 +132,48 @@ A minimal example configuration:
     "size": 4,
     "use_spaces": true
   },
+  "spacing": {
+    "around_operators": true,
+    "around_commas": true
+  },
   "line_breaks": {
     "empty_lines_between_probes": 1
+  },
+  "blocks": {
+    "brace_style": "next_line"
   }
 }
 ```
 
-Configuration is JSON with these top-level sections: `indent`, `spacing`,
-`line_breaks`, `comments`, `probes`, `blocks`.
+### Configuration Options
 
-Run `./btfmt -generate-config` to generate a full default configuration file.
+| Section       | Option                       | Default     | Description                              |
+| ------------- | ---------------------------- | ----------- | ---------------------------------------- |
+| `indent`      | `size`                       | 4           | Spaces/tabs per indent level             |
+| `indent`      | `use_spaces`                 | true        | Use spaces instead of tabs               |
+| `spacing`     | `around_operators`           | true        | Space around `=`, `+`, `-`, etc.         |
+| `spacing`     | `around_commas`              | true        | Space after commas                       |
+| `spacing`     | `before_block_start`         | true        | Space before `{`                         |
+| `spacing`     | `after_keywords`             | true        | Space after `if`, `while`, etc.          |
+| `line_breaks` | `empty_lines_between_probes` | 1           | Empty lines between probe blocks         |
+| `line_breaks` | `empty_lines_after_shebang`  | 1           | Empty lines after shebang                |
+| `blocks`      | `brace_style`                | "next_line" | `"same_line"`, `"next_line"`, or `"gnu"` |
 
-## Example
+## VS Code Extension
 
-Input file (`testdata/test_input.bt`):
+The VS Code extension provides:
 
-```bpftrace
-#!/usr/bin/env bpftrace
-tracepoint:syscalls:sys_enter_openat{printf("openat: %s\n",str(args.filename));}
-tracepoint:syscalls:sys_enter_openat2{printf("openat2: %s\n",str(args->filename));}
-tracepoint:syscalls:sys_enter_openat/pid==1234/{@opens[pid]=count();}
-```
+- Syntax highlighting for `.bt` files
+- Format on save (enable in VS Code settings)
+- Format document command (`Shift+Alt+F`)
 
-Output:
+### Extension Settings
 
-```bpftrace
-#!/usr/bin/env bpftrace
-tracepoint:syscalls:sys_enter_openat {
-    printf("openat: %s\n",str(args.filename));
-}
+| Setting            | Default | Description                                           |
+| ------------------ | ------- | ----------------------------------------------------- |
+| `btfmt.serverPath` | `btfmt` | Path to btfmt binary (uses bundled binary by default) |
+| `btfmt.configPath` | `""`    | Path to `.btfmt.json` configuration file              |
 
-tracepoint:syscalls:sys_enter_openat2 {
-    printf("openat2: %s\n",str(args->filename));
-}
+## License
 
-tracepoint:syscalls:sys_enter_openat/pid==1234/ {
-    @opens[pid] = count();
-}
-```
-
-## Grammar Compilation
-
-```bash
-task compile-grammar
-# or
-uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser bpftrace.g4
-```
-
-## Testing
-
-```bash
-task test
-# or
-go test ./...
-```
-
-## Project Structure
-
-- `cmd/btfmt/`: CLI entry point and tests
-- `formatter/`: AST formatter and visitor
-- `config/`: configuration types and loader
-- `parser/`: generated ANTLR parser/lexer (do not edit by hand)
-- `bpftrace.g4`: grammar definition
-- `testdata/`: input fixtures and golden output
-
-## Supported Syntax Features
-
-- Probe definitions and predicates
-- Statements (if/while/for, return, print/printf, clear/delete)
-- Expressions (logical, arithmetic, relational, unary)
-- Built-in functions and maps
-- Comments and shebang handling
-
-## Limitations
-
-- Some edge-case bpftrace syntax may need further polishing
-- Complex multi-line blocks may still require manual review
-
-## Development
-
-This project is developed in Go. Contributions and issue reports are welcome.
+[Unlicense](LICENSE) (Public Domain)
