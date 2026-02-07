@@ -93,10 +93,30 @@ func ParseBpftrace(input string) (parser.IProgramContext, error) {
 	lexer.AddErrorListener(errorListener)
 	tokenStream := antlr.NewCommonTokenStream(lexer, 0)
 
+	tree, sllErr := parseProgramWithMode(tokenStream, antlr.PredictionModeSLL)
+	if lexerErr := errorListener.Err(); lexerErr == nil && sllErr == nil {
+		return tree, nil
+	}
+
+	tokenStream.Seek(0)
+	tree, llErr := parseProgramWithMode(tokenStream, antlr.PredictionModeLL)
+
+	if lexerErr := errorListener.Err(); lexerErr != nil {
+		return nil, lexerErr
+	}
+	if llErr != nil {
+		return nil, llErr
+	}
+	return tree, nil
+}
+
+func parseProgramWithMode(tokenStream *antlr.CommonTokenStream, mode int) (parser.IProgramContext, error) {
+	errorListener := newSyntaxErrorListener()
+
 	p := parser.NewbpftraceParser(tokenStream)
 	p.RemoveErrorListeners()
 	p.AddErrorListener(errorListener)
-	p.GetInterpreter().SetPredictionMode(antlr.PredictionModeSLL)
+	p.GetInterpreter().SetPredictionMode(mode)
 
 	tree := p.Program()
 	if err := errorListener.Err(); err != nil {

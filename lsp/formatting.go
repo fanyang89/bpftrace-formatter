@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -19,12 +20,22 @@ type formatResult struct {
 	err  error
 }
 
+func sendFormatResult(ctx context.Context, ch chan<- formatResult, result formatResult) {
+	select {
+	case ch <- result:
+	case <-ctx.Done():
+	}
+}
+
 func formatWithTimeout(doc *Document, cfg *config.Config, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	ch := make(chan formatResult, 1)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				ch <- formatResult{err: fmt.Errorf("formatter panic: %v", r)}
+				sendFormatResult(ctx, ch, formatResult{err: fmt.Errorf("formatter panic: %v", r)})
 			}
 		}()
 		start := time.Now()
@@ -34,17 +45,17 @@ func formatWithTimeout(doc *Document, cfg *config.Config, timeout time.Duration)
 		if doc.ParseResult != nil && doc.ParseResult.Tree != nil && len(doc.ParseResult.Diagnostics) == 0 {
 			text := f.FormatTree(doc.ParseResult.Tree)
 			log.Printf("[format] FormatTree took %s", time.Since(start))
-			ch <- formatResult{text: text}
+			sendFormatResult(ctx, ch, formatResult{text: text})
 		} else {
 			formatted, err := f.Format(doc.Text)
 			log.Printf("[format] Format took %s", time.Since(start))
-			ch <- formatResult{text: formatted, err: err}
+			sendFormatResult(ctx, ch, formatResult{text: formatted, err: err})
 		}
 	}()
 	select {
 	case res := <-ch:
 		return res.text, res.err
-	case <-time.After(timeout):
+	case <-ctx.Done():
 		return "", fmt.Errorf("formatting timed out after %s", timeout)
 	}
 }
