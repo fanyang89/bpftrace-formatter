@@ -7,7 +7,7 @@ import {
   State,
   Trace,
 } from 'vscode-languageclient/node';
-import { spawn } from 'child_process';
+import { execFile } from 'child_process';
 
 let client: LanguageClient | undefined;
 
@@ -20,13 +20,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   outputChannel.appendLine(`[Info ] Using server path: ${serverPath}`);
 
-  // Test if the server is accessible
-  const testProc = spawn(serverPath, ['--help'], { stdio: ['ignore', 'pipe', 'pipe'] });
-  testProc.on('error', (err) => {
-    outputChannel.appendLine(`[Error] Cannot spawn ${serverPath}: ${err.message}`);
-  });
-  testProc.on('close', (code) => {
-    outputChannel.appendLine(`[Info ] Server test exit code: ${code}`);
+  // Test if the server is accessible (execFile auto-cleans up)
+  execFile(serverPath, ['--help'], { timeout: 5000 }, (err, _stdout, _stderr) => {
+    if (err) {
+      outputChannel.appendLine(`[Error] Cannot run ${serverPath}: ${err.message}`);
+    } else {
+      outputChannel.appendLine(`[Info ] Server binary OK`);
+    }
   });
 
   const serverOptions: ServerOptions = {
