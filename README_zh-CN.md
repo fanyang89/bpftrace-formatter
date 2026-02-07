@@ -1,141 +1,177 @@
-# BPFTrace Formatter
+# btfmt
 
-一个基于 ANTLR4 的 bpftrace 脚本格式化工具。
+bpftrace 脚本格式化工具，支持 VS Code 集成。
 
 ## 功能特性
 
-- 基于语法解析的 bpftrace 格式化
-- 可配置的缩进、间距、换行、注释、探针与代码块
-- 保留 shebang 和注释
-- 支持多文件与就地格式化
+- 格式化 bpftrace 脚本，统一缩进、间距和结构
+- VS Code 扩展内置二进制，安装即用
+- 支持语言服务器协议 (LSP)，可集成到各种编辑器
+- 通过 JSON 配置文件自定义格式化规则
+- 保留注释和 shebang
 
-## 构建
+## 安装
+
+### VS Code 扩展（推荐）
+
+从 [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) 页面下载 `btfmt-lsp` 扩展：
+
+1. 下载对应平台的 `.vsix` 文件（如 `btfmt-lsp-0.0.2@linux-x64.vsix`）
+2. 在 VS Code 中按 `Ctrl+Shift+P`，运行 "Extensions: Install from VSIX..."
+3. 选择下载的文件
+
+扩展已内置 btfmt 二进制，无需额外安装。
+
+### CLI 二进制
+
+从 [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) 下载预编译的二进制文件：
+
+| 平台          | 文件                        |
+| ------------- | --------------------------- |
+| Linux x64     | `btfmt-linux-amd64.tar.gz`  |
+| Linux ARM64   | `btfmt-linux-arm64.tar.gz`  |
+| macOS x64     | `btfmt-darwin-amd64.tar.gz` |
+| macOS ARM64   | `btfmt-darwin-arm64.tar.gz` |
+| Windows x64   | `btfmt-windows-amd64.zip`   |
+| Windows ARM64 | `btfmt-windows-arm64.zip`   |
+
+解压并添加到 PATH：
 
 ```bash
-go mod tidy
-task build
-# 或
+tar -xzf btfmt-linux-amd64.tar.gz
+sudo mv btfmt /usr/local/bin/
+```
+
+### 从源码构建
+
+```bash
+go install github.com/fanyang89/bpftrace-formatter/cmd/btfmt@latest
+```
+
+或克隆仓库构建：
+
+```bash
+git clone https://github.com/fanyang89/bpftrace-formatter.git
+cd bpftrace-formatter
 go build ./cmd/btfmt
 ```
 
 ## 使用方法
 
-### 基本用法
+### 格式化文件
 
 ```bash
-./btfmt <file.bt>
+btfmt script.bt          # 输出到 stdout
+btfmt -w script.bt       # 写回文件
+btfmt -w *.bt            # 格式化多个文件
 ```
-
-### 就地修改 / 写回
-
-```bash
-./btfmt -i <file.bt>
-./btfmt -w <file1.bt> <file2.bt>
-```
-
-### 配置
-
-```bash
-./btfmt -generate-config
-./btfmt -config <path/to/.btfmt.json> <file.bt>
-```
-
-选项：
-
-- `-c`, `-config <file>`: 指定配置文件路径
-- `-i`: 就地修改文件
-- `-w`: 将结果写回源文件（默认输出到 stdout）
-- `-v`, `-verbose`: 启用详细日志
-- `-generate-config`: 生成默认配置文件
-- `-config-output <file>`: 生成配置的输出路径（默认：.btfmt.json）
-- `-help`: 显示帮助信息
 
 ### 示例
 
-输入文件 (`testdata/test_input.bt`):
+格式化前：
 
 ```bpftrace
 #!/usr/bin/env bpftrace
 tracepoint:syscalls:sys_enter_openat{printf("openat: %s\n",str(args.filename));}
-tracepoint:syscalls:sys_enter_openat2{printf("openat2: %s\n",str(args->filename));}
 tracepoint:syscalls:sys_enter_openat/pid==1234/{@opens[pid]=count();}
 ```
 
-输出:
+格式化后：
 
 ```bpftrace
 #!/usr/bin/env bpftrace
-tracepoint:syscalls:sys_enter_openat {
-    printf("openat: %s\n",str(args.filename));
+
+tracepoint:syscalls:sys_enter_openat
+{
+    printf("openat: %s\n", str(args.filename));
 }
 
-tracepoint:syscalls:sys_enter_openat2 {
-    printf("openat2: %s\n",str(args->filename));
-}
-
-tracepoint:syscalls:sys_enter_openat/pid==1234/ {
+tracepoint:syscalls:sys_enter_openat /pid == 1234/
+{
     @opens[pid] = count();
 }
 ```
 
-## 配置说明
+### 命令行选项
 
-配置加载顺序如下：
+```
+btfmt [options] <file.bt> [file2.bt ...]
+
+选项：
+  -w                     将结果写回源文件
+  -i                     就地修改文件（同 -w）
+  -c, -config <file>     指定配置文件路径
+  -v, -verbose           启用详细输出
+  -generate-config       生成默认配置文件
+  -version               显示版本信息
+  -help                  显示帮助信息
+```
+
+## 配置
+
+btfmt 按以下顺序查找配置：
 
 1. 通过 `-config` 指定的文件
 2. 当前目录或父目录中的 `.btfmt.json`
 3. 家目录中的 `~/.btfmt.json`
 4. 内置默认值
 
-如果通过 `-config` 指定的文件不存在，CLI 会给出警告，并直接使用内置默认值，不再继续搜索 `.btfmt.json`。
+生成默认配置文件：
 
-配置使用 JSON，顶层包含以下字段：`indent`、`spacing`、
-`line_breaks`、`comments`、`probes`、`blocks`。
+```bash
+btfmt -generate-config
+```
 
-示例：
+示例 `.btfmt.json`：
 
 ```json
 {
-  "indent": { "size": 4, "use_spaces": true },
-  "spacing": { "around_operators": true, "around_commas": true },
-  "line_breaks": { "empty_lines_between_probes": 1, "max_line_length": 80 },
-  "comments": { "preserve_inline": true },
-  "probes": { "sort_probes": false },
-  "blocks": { "brace_style": "next_line" }
+  "indent": {
+    "size": 4,
+    "use_spaces": true
+  },
+  "spacing": {
+    "around_operators": true,
+    "around_commas": true
+  },
+  "line_breaks": {
+    "empty_lines_between_probes": 1
+  },
+  "blocks": {
+    "brace_style": "next_line"
+  }
 }
 ```
 
-## 语法编译
+### 配置选项
 
-```bash
-task compile-grammar
-```
+| 分类          | 选项                         | 默认值      | 说明                             |
+| ------------- | ---------------------------- | ----------- | -------------------------------- |
+| `indent`      | `size`                       | 4           | 每级缩进的空格/制表符数          |
+| `indent`      | `use_spaces`                 | true        | 使用空格而非制表符               |
+| `spacing`     | `around_operators`           | true        | 在 `=`、`+`、`-` 等周围加空格    |
+| `spacing`     | `around_commas`              | true        | 逗号后加空格                     |
+| `spacing`     | `before_block_start`         | true        | `{` 前加空格                     |
+| `spacing`     | `after_keywords`             | true        | `if`、`while` 等关键字后加空格   |
+| `line_breaks` | `empty_lines_between_probes` | 1           | 探针块之间的空行数               |
+| `line_breaks` | `empty_lines_after_shebang`  | 1           | shebang 后的空行数               |
+| `blocks`      | `brace_style`                | "next_line" | `"same_line"`、`"next_line"` 或 `"gnu"` |
 
-## 测试
+## VS Code 扩展
 
-```bash
-task test
-# 或
-go test ./...
-```
+VS Code 扩展提供：
 
-## 项目结构
+- `.bt` 文件语法高亮
+- 保存时自动格式化（在 VS Code 设置中启用）
+- 格式化文档命令（`Shift+Alt+F`）
 
-- `cmd/btfmt/`: CLI 入口
-- `formatter/`: AST 格式化逻辑与访问器
-- `config/`: 配置结构与加载器
-- `parser/`: 生成的 ANTLR 解析器/词法器
-- `bpftrace.g4`: 语法定义
-- `testdata/`: 测试脚本与样例
+### 扩展设置
 
-## 支持的语法特性
+| 设置               | 默认值   | 说明                                     |
+| ------------------ | -------- | ---------------------------------------- |
+| `btfmt.serverPath` | `btfmt`  | btfmt 二进制路径（默认使用内置二进制）   |
+| `btfmt.configPath` | `""`     | `.btfmt.json` 配置文件路径               |
 
-- 探针定义与谓词
-- 语句（if/while/for、return、print/printf、clear/delete）
-- 表达式（逻辑、算术、关系、单目）
-- 内置函数与 maps
-- 注释与 shebang 处理
+## 许可证
 
-## 开发
-
-这个项目使用 Go 开发，欢迎贡献代码和报告问题。
+[Unlicense](LICENSE)（公共领域）
