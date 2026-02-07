@@ -1,23 +1,22 @@
-# btfmt LSP (VS Code extension)
+# btfmt LSP
 
-This extension wires the `btfmt` LSP server into VS Code.
+VS Code extension for formatting bpftrace scripts.
 
-## Requirements
+## Features
 
-- Build or install `btfmt` so it is available in `PATH`, or set an absolute path in settings.
-- The server is started as `btfmt lsp` over stdio.
+- Syntax highlighting for `.bt` files
+- Format on save
+- Format document command (`Shift+Alt+F`)
+
+## Installation
+
+Download the `.vsix` file for your platform from [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) and install via "Extensions: Install from VSIX..." command.
+
+The extension includes the btfmt binary - no additional installation required.
 
 ## Settings
 
-- `btfmt.serverPath`: Path to the `btfmt` executable (default: `btfmt`).
-- `btfmt.configPath`: Path to `.btfmt.json` (absolute or workspace-relative).
-
-## Development
-
-```bash
-cd vscode-extension
-npm install
-npm run compile
-```
-
-Press `F5` in VS Code to launch the extension host.
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `btfmt.serverPath` | `btfmt` | Path to btfmt binary (uses bundled binary by default) |
+| `btfmt.configPath` | `""` | Path to `.btfmt.json` configuration file |

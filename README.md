@@ -174,4 +174,4 @@ The VS Code extension provides:
 
 ## License
 
-MIT
+[Unlicense](LICENSE) (Public Domain)
