@@ -2,7 +2,7 @@
   "name": "btfmt-lsp",
   "displayName": "btfmt LSP",
   "description": "bpftrace formatter LSP client for VS Code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "local",
   "repository": {
     "url": "https://github.com/fanyang89/bpftrace-formatter.git"
@@ -17,9 +17,24 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:bpftrace"
+    "onLanguage:bpftrace",
+    "onCommand:btfmt.restartLsp"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "btfmt.restartLsp",
+        "title": "Restart LSP",
+        "category": "btfmt"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bpftrace",
+        "scopeName": "source.bpftrace",
+        "path": "./syntaxes/bpftrace.tmLanguage.json"
+      }
+    ],
     "languages": [
       {
         "id": "bpftrace",
@@ -49,9 +64,9 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -p ./ -w",
-    "vscode:prepublish": "npm run compile"
+    "compile": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "npm run compile -- --watch",
+    "vscode:prepublish": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -59,6 +74,8 @@
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.27.3",
     "typescript": "^5.4.5"
   }
 }

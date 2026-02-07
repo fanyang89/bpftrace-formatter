@@ -18,11 +18,18 @@ type formatResult struct {
 	err  error
 }
 
-func formatWithTimeout(text string, cfg *config.Config, timeout time.Duration) (string, error) {
+func formatWithTimeout(doc *Document, cfg *config.Config, timeout time.Duration) (string, error) {
 	ch := make(chan formatResult, 1)
 	go func() {
-		formatted, err := formatter.NewASTFormatter(cfg).Format(text)
-		ch <- formatResult{text: formatted, err: err}
+		f := formatter.NewASTFormatter(cfg)
+		// Reuse the parse tree from didOpen/didChange when available,
+		// avoiding a redundant ANTLR parse.
+		if doc.ParseResult != nil && doc.ParseResult.Tree != nil && len(doc.ParseResult.Diagnostics) == 0 {
+			ch <- formatResult{text: f.FormatTree(doc.ParseResult.Tree), err: nil}
+		} else {
+			formatted, err := f.Format(doc.Text)
+			ch <- formatResult{text: formatted, err: err}
+		}
 	}()
 	select {
 	case res := <-ch:
@@ -43,7 +50,7 @@ func formatDocument(uri string) ([]protocol.TextEdit, error) {
 		cfg = config.DefaultConfig()
 	}
 
-	formatted, err := formatWithTimeout(doc.Text, cfg, formatTimeout)
+	formatted, err := formatWithTimeout(doc, cfg, formatTimeout)
 	if err != nil {
 		return nil, err
 	}

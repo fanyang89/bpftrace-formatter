@@ -48,13 +48,14 @@ func ParseDocument(input string) *ParseResult {
 	lexer := parser.NewbpftraceLexer(inputStream)
 	lexer.RemoveErrorListeners()
 	lexer.AddErrorListener(listener)
-
 	stream := antlr.NewCommonTokenStream(lexer, 0)
-	bpftraceParser := parser.NewbpftraceParser(stream)
-	bpftraceParser.RemoveErrorListeners()
-	bpftraceParser.AddErrorListener(listener)
 
-	tree := bpftraceParser.Program()
+	p := parser.NewbpftraceParser(stream)
+	p.RemoveErrorListeners()
+	p.AddErrorListener(listener)
+	p.GetInterpreter().SetPredictionMode(antlr.PredictionModeSLL)
+
+	tree := p.Program()
 
 	return &ParseResult{
 		Tree:        tree,
