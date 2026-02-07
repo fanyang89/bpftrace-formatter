@@ -71,6 +71,68 @@ func TestInitialize_ReturnsServerCapabilities(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspaceConfigurationResult_FallsBackToInitSettings(t *testing.T) {
+	setupTestState(t)
+
+	initSettingsMu.Lock()
+	initSettings = map[string]any{
+		"btfmt": map[string]any{
+			"indent": map[string]any{"size": 2},
+		},
+	}
+	initSettingsMu.Unlock()
+
+	applyWorkspaceConfigurationResult(nil)
+
+	configResolver.mu.Lock()
+	defer configResolver.mu.Unlock()
+
+	btfmtSettings, ok := configResolver.settings["btfmt"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected btfmt settings, got %#v", configResolver.settings)
+	}
+	indent, ok := btfmtSettings["indent"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected indent settings, got %#v", btfmtSettings)
+	}
+	if size, ok := indent["size"].(int); !ok || size != 2 {
+		t.Fatalf("expected fallback indent size 2, got %#v", indent["size"])
+	}
+}
+
+func TestApplyWorkspaceConfigurationResult_PrefersWorkspaceSettings(t *testing.T) {
+	setupTestState(t)
+
+	initSettingsMu.Lock()
+	initSettings = map[string]any{
+		"btfmt": map[string]any{
+			"indent": map[string]any{"size": 2},
+		},
+	}
+	initSettingsMu.Unlock()
+
+	applyWorkspaceConfigurationResult([]any{
+		map[string]any{
+			"indent": map[string]any{"size": 6},
+		},
+	})
+
+	configResolver.mu.Lock()
+	defer configResolver.mu.Unlock()
+
+	btfmtSettings, ok := configResolver.settings["btfmt"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected btfmt settings, got %#v", configResolver.settings)
+	}
+	indent, ok := btfmtSettings["indent"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected indent settings, got %#v", btfmtSettings)
+	}
+	if size, ok := indent["size"].(int); !ok || size != 6 {
+		t.Fatalf("expected workspace indent size 6, got %#v", indent["size"])
+	}
+}
+
 func TestDidOpen_PopulatesDiagnosticsForInvalidDocument(t *testing.T) {
 	uri := setupTestState(t)
 

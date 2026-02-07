@@ -69,6 +69,8 @@ func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
 		return nil
 	}
 
+	applyInitSettingsFallback()
+
 	if configSupported.Load() {
 		// Fetch configuration asynchronously to avoid blocking the message loop.
 		// A synchronous call here would deadlock because the response arrives
@@ -80,18 +82,26 @@ func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
 			}
 			var result []any
 			context.Call(protocol.ServerWorkspaceConfiguration, params, &result)
-			if settings := settingsFromConfigurationResult(result); settings != nil {
-				configResolver.SetSettings(settings)
-			}
+			applyWorkspaceConfigurationResult(result)
 		}()
 		return nil
 	}
 
+	return nil
+}
+
+func applyInitSettingsFallback() {
 	if settings := getInitSettings(); settings != nil {
 		configResolver.SetSettings(normalizeSettingsMap(settings))
 	}
+}
 
-	return nil
+func applyWorkspaceConfigurationResult(result []any) {
+	if settings := settingsFromConfigurationResult(result); settings != nil {
+		configResolver.SetSettings(settings)
+		return
+	}
+	applyInitSettingsFallback()
 }
 
 func didOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
