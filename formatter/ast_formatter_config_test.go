@@ -363,3 +363,256 @@ func TestASTFormatter_IfElseBraceStyleNextLine(t *testing.T) {
 		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, want)
 	}
 }
+
+func TestASTFormatter_IndentSize(t *testing.T) {
+	tests := []struct {
+		name       string
+		indentSize int
+		want       string
+	}{
+		{
+			name:       "indent size 2",
+			indentSize: 2,
+			want: "BEGIN\n" +
+				"{\n" +
+				"  exit();\n" +
+				"}",
+		},
+		{
+			name:       "indent size 8",
+			indentSize: 8,
+			want: "BEGIN\n" +
+				"{\n" +
+				"        exit();\n" +
+				"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Indent.Size = tt.indentSize
+			cfg.Indent.UseSpaces = true
+
+			input := "BEGIN{exit();}"
+			got, err := NewASTFormatter(cfg).Format(input)
+			if err != nil {
+				t.Fatalf("Format returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASTFormatter_BeforeBlockStartSpacing(t *testing.T) {
+	tests := []struct {
+		name             string
+		beforeBlockStart bool
+		want             string
+	}{
+		{
+			name:             "space before block start enabled",
+			beforeBlockStart: true,
+			want: "BEGIN {\n" +
+				"    exit();\n" +
+				"}",
+		},
+		{
+			name:             "space before block start disabled",
+			beforeBlockStart: false,
+			want: "BEGIN{\n" +
+				"    exit();\n" +
+				"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Blocks.BraceStyle = "same_line"
+			cfg.Spacing.BeforeBlockStart = tt.beforeBlockStart
+
+			input := "BEGIN{exit();}"
+			got, err := NewASTFormatter(cfg).Format(input)
+			if err != nil {
+				t.Fatalf("Format returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASTFormatter_AfterKeywordsSpacing(t *testing.T) {
+	tests := []struct {
+		name          string
+		afterKeywords bool
+		want          string
+	}{
+		{
+			name:          "space after keywords enabled",
+			afterKeywords: true,
+			want: "BEGIN\n" +
+				"{\n" +
+				"    if (1)\n" +
+				"    {\n" +
+				"        exit();\n" +
+				"    };\n" +
+				"}",
+		},
+		{
+			name:          "space after keywords disabled",
+			afterKeywords: false,
+			want: "BEGIN\n" +
+				"{\n" +
+				"    if(1)\n" +
+				"    {\n" +
+				"        exit();\n" +
+				"    };\n" +
+				"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Spacing.AfterKeywords = tt.afterKeywords
+
+			input := "BEGIN{if(1){exit();}}"
+			got, err := NewASTFormatter(cfg).Format(input)
+			if err != nil {
+				t.Fatalf("Format returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASTFormatter_EmptyLinesBetweenProbes(t *testing.T) {
+	tests := []struct {
+		name       string
+		emptyLines int
+		want       string
+	}{
+		{
+			name:       "zero empty lines between probes",
+			emptyLines: 0,
+			want: "BEGIN\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}\n" +
+				"END\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+		{
+			name:       "one empty line between probes",
+			emptyLines: 1,
+			want: "BEGIN\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}\n" +
+				"\n" +
+				"END\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+		{
+			name:       "two empty lines between probes",
+			emptyLines: 2,
+			want: "BEGIN\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}\n" +
+				"\n" +
+				"\n" +
+				"END\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.LineBreaks.EmptyLinesBetweenProbes = tt.emptyLines
+
+			input := "BEGIN{exit();}END{exit();}"
+			got, err := NewASTFormatter(cfg).Format(input)
+			if err != nil {
+				t.Fatalf("Format returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASTFormatter_EmptyLinesAfterShebang(t *testing.T) {
+	tests := []struct {
+		name       string
+		emptyLines int
+		want       string
+	}{
+		{
+			name:       "zero empty lines after shebang",
+			emptyLines: 0,
+			want: "#!/usr/bin/env bpftrace\n" +
+				"BEGIN\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+		{
+			name:       "one empty line after shebang",
+			emptyLines: 1,
+			want: "#!/usr/bin/env bpftrace\n" +
+				"\n" +
+				"BEGIN\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+		{
+			name:       "two empty lines after shebang",
+			emptyLines: 2,
+			want: "#!/usr/bin/env bpftrace\n" +
+				"\n" +
+				"\n" +
+				"BEGIN\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.LineBreaks.EmptyLinesAfterShebang = tt.emptyLines
+
+			input := "#!/usr/bin/env bpftrace\nBEGIN{exit();}"
+			got, err := NewASTFormatter(cfg).Format(input)
+			if err != nil {
+				t.Fatalf("Format returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, tt.want)
+			}
+		})
+	}
+}
