@@ -194,6 +194,70 @@ func TestFormatWithTimeout_RejectsNewVersionWhileTaskIsStillActive(t *testing.T)
 	if !errors.Is(err, errFormattingInProgress) {
 		t.Fatalf("expected errFormattingInProgress, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "sameConfig=true") {
+		t.Fatalf("expected sameConfig=true in error, got: %v", err)
+	}
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("runFormat call count = %d, want 1", got)
+	}
+
+	close(release)
+	<-finished
+	err = <-firstDone
+	if err != nil {
+		t.Fatalf("first call unexpected error: %v", err)
+	}
+}
+
+func TestFormatWithTimeout_RejectsChangedConfigWhileTaskIsStillActive(t *testing.T) {
+	resetFormatTasks()
+	t.Cleanup(resetFormatTasks)
+	oldRunFormat := runFormat
+	t.Cleanup(func() { runFormat = oldRunFormat })
+
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{}, 1)
+	runFormat = func(_ *Document, _ *config.Config) formatResult {
+		calls.Add(1)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		finished <- struct{}{}
+		return formatResult{text: "ok"}
+	}
+
+	uri := "file:///cfg-change.bt"
+	doc := &Document{Version: 1, Text: "BEGIN { exit(); }\n"}
+	cfgV1 := config.DefaultConfig()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := formatWithTimeout(uri, doc, cfgV1, time.Second)
+		firstDone <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for active formatter task")
+	}
+
+	cfgV2 := config.DefaultConfig()
+	cfgV2.Indent.Size = 2
+	_, err := formatWithTimeout(uri, doc, cfgV2, 10*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected in-progress error")
+	}
+	if !errors.Is(err, errFormattingInProgress) {
+		t.Fatalf("expected errFormattingInProgress, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sameConfig=false") {
+		t.Fatalf("expected sameConfig=false in error, got: %v", err)
+	}
 
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("runFormat call count = %d, want 1", got)

@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -22,9 +23,10 @@ type formatResult struct {
 }
 
 type formatTask struct {
-	version int32
-	done    chan struct{}
-	result  formatResult
+	version        int32
+	cfgFingerprint string
+	done           chan struct{}
+	result         formatResult
 }
 
 var (
@@ -48,7 +50,20 @@ var runFormat = func(doc *Document, cfg *config.Config) formatResult {
 	return formatResult{text: formatted, err: err}
 }
 
+func configFingerprint(cfg *config.Config) string {
+	if cfg == nil {
+		return "<nil>"
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Sprintf("fallback:%#v", cfg)
+	}
+	return string(data)
+}
+
 func getOrStartFormatTask(uri string, doc *Document, cfg *config.Config) (*formatTask, bool) {
+	fingerprint := configFingerprint(cfg)
+
 	formatTasksMu.Lock()
 	if task, exists := formatTasks[uri]; exists {
 		formatTasksMu.Unlock()
@@ -56,8 +71,9 @@ func getOrStartFormatTask(uri string, doc *Document, cfg *config.Config) (*forma
 	}
 
 	task := &formatTask{
-		version: doc.Version,
-		done:    make(chan struct{}),
+		version:        doc.Version,
+		cfgFingerprint: fingerprint,
+		done:           make(chan struct{}),
 	}
 	formatTasks[uri] = task
 	formatTasksMu.Unlock()
@@ -96,8 +112,18 @@ func removeFormatTaskIfCurrent(uri string, task *formatTask) {
 
 func formatWithTimeout(uri string, doc *Document, cfg *config.Config, timeout time.Duration) (string, error) {
 	task, reused := getOrStartFormatTask(uri, doc, cfg)
-	if reused && task.version != doc.Version {
-		return "", fmt.Errorf("%w for %s (running version=%d, requested=%d)", errFormattingInProgress, uri, task.version, doc.Version)
+	if reused {
+		currentFingerprint := configFingerprint(cfg)
+		if task.version != doc.Version || task.cfgFingerprint != currentFingerprint {
+			return "", fmt.Errorf(
+				"%w for %s (running version=%d, requested=%d, sameConfig=%t)",
+				errFormattingInProgress,
+				uri,
+				task.version,
+				doc.Version,
+				task.cfgFingerprint == currentFingerprint,
+			)
+		}
 	}
 
 	timer := time.NewTimer(timeout)
