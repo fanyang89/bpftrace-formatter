@@ -1,10 +1,11 @@
 package lsp
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -20,42 +21,83 @@ type formatResult struct {
 	err  error
 }
 
-func sendFormatResult(ctx context.Context, ch chan<- formatResult, result formatResult) {
-	select {
-	case ch <- result:
-	case <-ctx.Done():
-	}
+type formatTask struct {
+	version int32
+	done    chan struct{}
+	result  formatResult
 }
 
-func formatWithTimeout(doc *Document, cfg *config.Config, timeout time.Duration) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+var (
+	errFormattingInProgress = errors.New("formatting already in progress")
+	formatTasksMu           sync.Mutex
+	formatTasks             = map[string]*formatTask{}
+)
 
-	ch := make(chan formatResult, 1)
+var runFormat = func(doc *Document, cfg *config.Config) formatResult {
+	start := time.Now()
+	f := formatter.NewASTFormatter(cfg)
+	// Reuse the parse tree from didOpen/didChange when available,
+	// avoiding a redundant ANTLR parse.
+	if doc.ParseResult != nil && doc.ParseResult.Tree != nil && len(doc.ParseResult.Diagnostics) == 0 {
+		text := f.FormatTree(doc.ParseResult.Tree)
+		log.Printf("[format] FormatTree took %s", time.Since(start))
+		return formatResult{text: text}
+	}
+	formatted, err := f.Format(doc.Text)
+	log.Printf("[format] Format took %s", time.Since(start))
+	return formatResult{text: formatted, err: err}
+}
+
+func getOrStartFormatTask(uri string, doc *Document, cfg *config.Config) (*formatTask, bool) {
+	formatTasksMu.Lock()
+	if task, exists := formatTasks[uri]; exists {
+		formatTasksMu.Unlock()
+		return task, true
+	}
+
+	task := &formatTask{
+		version: doc.Version,
+		done:    make(chan struct{}),
+	}
+	formatTasks[uri] = task
+	formatTasksMu.Unlock()
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				sendFormatResult(ctx, ch, formatResult{err: fmt.Errorf("formatter panic: %v", r)})
+				task.result = formatResult{err: fmt.Errorf("formatter panic: %v", r)}
 			}
+			close(task.done)
+			formatTasksMu.Lock()
+			if current, exists := formatTasks[uri]; exists && current == task {
+				delete(formatTasks, uri)
+			}
+			formatTasksMu.Unlock()
 		}()
-		start := time.Now()
-		f := formatter.NewASTFormatter(cfg)
-		// Reuse the parse tree from didOpen/didChange when available,
-		// avoiding a redundant ANTLR parse.
-		if doc.ParseResult != nil && doc.ParseResult.Tree != nil && len(doc.ParseResult.Diagnostics) == 0 {
-			text := f.FormatTree(doc.ParseResult.Tree)
-			log.Printf("[format] FormatTree took %s", time.Since(start))
-			sendFormatResult(ctx, ch, formatResult{text: text})
-		} else {
-			formatted, err := f.Format(doc.Text)
-			log.Printf("[format] Format took %s", time.Since(start))
-			sendFormatResult(ctx, ch, formatResult{text: formatted, err: err})
-		}
+		task.result = runFormat(doc, cfg)
 	}()
+
+	return task, false
+}
+
+func resetFormatTasks() {
+	formatTasksMu.Lock()
+	defer formatTasksMu.Unlock()
+	formatTasks = map[string]*formatTask{}
+}
+
+func formatWithTimeout(uri string, doc *Document, cfg *config.Config, timeout time.Duration) (string, error) {
+	task, reused := getOrStartFormatTask(uri, doc, cfg)
+	if reused && task.version != doc.Version {
+		return "", fmt.Errorf("%w for %s (running version=%d, requested=%d)", errFormattingInProgress, uri, task.version, doc.Version)
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
-	case res := <-ch:
-		return res.text, res.err
-	case <-ctx.Done():
+	case <-task.done:
+		return task.result.text, task.result.err
+	case <-timer.C:
 		return "", fmt.Errorf("formatting timed out after %s", timeout)
 	}
 }
@@ -71,7 +113,7 @@ func formatDocument(uri string) ([]protocol.TextEdit, error) {
 		cfg = config.DefaultConfig()
 	}
 
-	formatted, err := formatWithTimeout(doc, cfg, formatTimeout)
+	formatted, err := formatWithTimeout(uri, doc, cfg, formatTimeout)
 	if err != nil {
 		return nil, err
 	}
