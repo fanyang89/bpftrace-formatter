@@ -14,16 +14,22 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
+            vscode_target: linux-x64
           - goos: linux
             goarch: arm64
+            vscode_target: linux-arm64
           - goos: darwin
             goarch: amd64
+            vscode_target: darwin-x64
           - goos: darwin
             goarch: arm64
+            vscode_target: darwin-arm64
           - goos: windows
             goarch: amd64
+            vscode_target: win32-x64
           - goos: windows
             goarch: arm64
+            vscode_target: win32-arm64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,13 +68,84 @@ jobs:
           zip ${ARCHIVE_NAME} btfmt.exe
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
 
-      - name: Upload artifact
+      - name: Upload binary archive
         uses: actions/upload-artifact@v4
         with:
           name: btfmt-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.ARCHIVE_NAME }}
 
-  build-vscode-extension:
+      - name: Prepare binary for VS Code extension
+        run: |
+          mkdir -p vscode-binary
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            cp btfmt.exe vscode-binary/
+          else
+            cp btfmt vscode-binary/
+          fi
+
+      - name: Upload binary for VS Code extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-binary-${{ matrix.vscode_target }}
+          path: vscode-binary/
+
+  build-vscode-extensions:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - vscode_target: linux-x64
+          - vscode_target: linux-arm64
+          - vscode_target: darwin-x64
+          - vscode_target: darwin-arm64
+          - vscode_target: win32-x64
+          - vscode_target: win32-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: vscode-binary-${{ matrix.vscode_target }}
+          path: vscode-extension/bin
+
+      - name: Make binary executable
+        if: matrix.vscode_target != 'win32-x64' && matrix.vscode_target != 'win32-arm64'
+        run: chmod +x vscode-extension/bin/btfmt
+
+      - name: Install dependencies
+        working-directory: vscode-extension
+        run: npm install
+
+      - name: Build extension
+        working-directory: vscode-extension
+        run: npm run vscode:prepublish
+
+      - name: Package platform-specific extension
+        working-directory: vscode-extension
+        run: npx vsce package --no-dependencies --target ${{ matrix.vscode_target }}
+
+      - name: Find VSIX file
+        id: find-vsix
+        working-directory: vscode-extension
+        run: |
+          VSIX_FILE=$(ls *.vsix)
+          echo "vsix_file=${VSIX_FILE}" >> $GITHUB_OUTPUT
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension-${{ matrix.vscode_target }}
+          path: vscode-extension/${{ steps.find-vsix.outputs.vsix_file }}
+
+  build-universal-vscode-extension:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +163,7 @@ jobs:
         working-directory: vscode-extension
         run: npm run vscode:prepublish
 
-      - name: Package extension
+      - name: Package universal extension
         working-directory: vscode-extension
         run: npx vsce package --no-dependencies
 
@@ -97,14 +174,14 @@ jobs:
           VSIX_FILE=$(ls *.vsix)
           echo "vsix_file=${VSIX_FILE}" >> $GITHUB_OUTPUT
 
-      - name: Upload artifact
+      - name: Upload extension artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vscode-extension
+          name: vscode-extension-universal
           path: vscode-extension/${{ steps.find-vsix.outputs.vsix_file }}
 
   publish:
-    needs: [build-binaries, build-vscode-extension]
+    needs: [build-binaries, build-vscode-extensions, build-universal-vscode-extension]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -117,7 +194,10 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" \) -exec cp {} release/ \;
+          # Copy binary archives
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
+          # Copy all vsix files
+          find artifacts -type f -name "*.vsix" -exec cp {} release/ \;
           ls -la release/
 
       - name: Generate checksums

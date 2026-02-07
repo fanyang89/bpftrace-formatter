@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -11,9 +13,37 @@ import { execFile } from 'child_process';
 
 let client: LanguageClient | undefined;
 
-export function activate(context: vscode.ExtensionContext): void {
+function getBundledBinaryPath(context: vscode.ExtensionContext): string | undefined {
+  const binaryName = process.platform === 'win32' ? 'btfmt.exe' : 'btfmt';
+  const binaryPath = path.join(context.extensionPath, 'bin', binaryName);
+
+  if (fs.existsSync(binaryPath)) {
+    return binaryPath;
+  }
+  return undefined;
+}
+
+function getServerPath(context: vscode.ExtensionContext): string {
   const config = vscode.workspace.getConfiguration('btfmt');
-  const serverPath = config.get<string>('serverPath') || 'btfmt';
+  const configuredPath = config.get<string>('serverPath');
+
+  // If user explicitly configured a path, use it
+  if (configuredPath && configuredPath !== 'btfmt') {
+    return configuredPath;
+  }
+
+  // Try bundled binary first
+  const bundledPath = getBundledBinaryPath(context);
+  if (bundledPath) {
+    return bundledPath;
+  }
+
+  // Fall back to PATH
+  return 'btfmt';
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+  const serverPath = getServerPath(context);
 
   const outputChannel = vscode.window.createOutputChannel('btfmt LSP');
   const traceChannel = vscode.window.createOutputChannel('btfmt LSP Trace');
