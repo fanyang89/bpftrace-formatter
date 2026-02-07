@@ -130,15 +130,15 @@ func TestWorkspaceRootsFromParams_Fallbacks(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRootsFromParams_RootURINonFileFallsBackToRootPath(t *testing.T) {
+func TestWorkspaceRootsFromParams_RemoteRootURI(t *testing.T) {
 	rootPath := t.TempDir()
 	rootURI := protocol.DocumentUri("vscode-remote://ssh-remote+host/home/user")
 	params := &protocol.InitializeParams{RootURI: &rootURI, RootPath: &rootPath}
 
 	got := workspaceRootsFromParams(params)
-	want := []string{rootPath}
+	want := []string{filepath.FromSlash("/home/user")}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("workspaceRootsFromParams non-file rootURI = %#v, want %#v", got, want)
+		t.Fatalf("workspaceRootsFromParams remote rootURI = %#v, want %#v", got, want)
 	}
 }
 

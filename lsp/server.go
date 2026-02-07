@@ -1,6 +1,11 @@
 package lsp
 
-import "github.com/tliron/glsp/server"
+import (
+	"log"
+	"os"
+
+	"github.com/tliron/glsp/server"
+)
 
 const (
 	serverName    = "btfmt"
@@ -9,7 +14,13 @@ const (
 
 // RunServer starts the LSP server over stdio.
 func RunServer() {
+	// Log to stderr so VSCode can capture it
+	log.SetOutput(os.Stderr)
+	log.SetFlags(log.Ltime | log.Lmicroseconds)
+	log.Print("[LSP] server starting")
+
 	handler := newHandler()
-	server := server.NewServer(&handler, serverName, false)
-	server.RunStdio()
+	srv := server.NewServer(&handler, serverName, false)
+	log.Print("[LSP] handler registered, running stdio")
+	srv.RunStdio()
 }

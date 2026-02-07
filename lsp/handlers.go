@@ -69,24 +69,39 @@ func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
 		return nil
 	}
 
-	if configSupported.Load() {
-		section := "btfmt"
-		params := protocol.ConfigurationParams{
-			Items: []protocol.ConfigurationItem{{Section: &section}},
-		}
-		var result []any
-		context.Call(protocol.ServerWorkspaceConfiguration, params, &result)
-		if settings := settingsFromConfigurationResult(result); settings != nil {
-			configResolver.SetSettings(settings)
-			return nil
-		}
-	}
+	applyInitSettingsFallback()
 
-	if settings := getInitSettings(); settings != nil {
-		configResolver.SetSettings(normalizeSettingsMap(settings))
+	if configSupported.Load() {
+		// Fetch configuration asynchronously to avoid blocking the message loop.
+		// A synchronous call here would deadlock because the response arrives
+		// on the same message loop that is waiting for this handler to return.
+		go func() {
+			section := "btfmt"
+			params := protocol.ConfigurationParams{
+				Items: []protocol.ConfigurationItem{{Section: &section}},
+			}
+			var result []any
+			context.Call(protocol.ServerWorkspaceConfiguration, params, &result)
+			applyWorkspaceConfigurationResult(result)
+		}()
+		return nil
 	}
 
 	return nil
+}
+
+func applyInitSettingsFallback() {
+	if settings := getInitSettings(); settings != nil {
+		configResolver.SetSettings(normalizeSettingsMap(settings))
+	}
+}
+
+func applyWorkspaceConfigurationResult(result []any) {
+	if settings := settingsFromConfigurationResult(result); settings != nil {
+		configResolver.SetSettings(settings)
+		return
+	}
+	applyInitSettingsFallback()
 }
 
 func didOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
@@ -155,7 +170,7 @@ func publishDiagnostics(context *glsp.Context, uri string, version *protocol.UIn
 	context.Notify(protocol.ServerTextDocumentPublishDiagnostics, params)
 }
 
-func didChangeConfiguration(_ *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
+func didChangeConfiguration(context *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
 	if params == nil {
 		return nil
 	}
@@ -166,7 +181,15 @@ func didChangeConfiguration(_ *glsp.Context, params *protocol.DidChangeConfigura
 	}
 
 	configResolver.SetSettings(normalizeSettingsMap(settings))
-	return documentStore.RefreshConfigs()
+	if err := documentStore.RefreshConfigs(); err != nil {
+		return err
+	}
+
+	for _, snap := range documentStore.AllDocs() {
+		version := protocol.UInteger(snap.Version)
+		publishDiagnostics(context, snap.URI, &version, snap.Diagnostics)
+	}
+	return nil
 }
 
 func didFormat(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {

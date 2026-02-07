@@ -59,7 +59,16 @@ func NewASTFormatter(cfg *config.Config) *ASTFormatter {
 
 // Format formats the given bpftrace script using AST
 func (f *ASTFormatter) Format(input string) (string, error) {
-	// Reset formatter state
+	tree, err := ParseBpftrace(input)
+	if err != nil {
+		return "", err
+	}
+	return f.FormatTree(tree), nil
+}
+
+// FormatTree formats a pre-parsed AST. This avoids re-parsing when the tree
+// is already available (e.g. from the LSP document store).
+func (f *ASTFormatter) FormatTree(tree antlr.Tree) string {
 	f.output.Reset()
 	f.indentLevel = 0
 	f.lastWasNewline = true
@@ -67,28 +76,53 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 	f.lineLength = 0
 	f.pendingSpace = false
 
-	// Create ANTLR input stream
+	visitor := NewASTVisitor(f)
+	visitor.Visit(tree)
+
+	return strings.TrimRightFunc(f.output.String(), unicode.IsSpace)
+}
+
+// ParseBpftrace parses a bpftrace script and returns the AST.
+// It uses a two-stage strategy: SLL prediction mode first (fast), falling back
+// to full LL mode only when the input is ambiguous.
+func ParseBpftrace(input string) (parser.IProgramContext, error) {
 	inputStream := antlr.NewInputStream(input)
 	lexer := parser.NewbpftraceLexer(inputStream)
 	errorListener := newSyntaxErrorListener()
 	lexer.RemoveErrorListeners()
 	lexer.AddErrorListener(errorListener)
 	tokenStream := antlr.NewCommonTokenStream(lexer, 0)
-	bpftraceParser := parser.NewbpftraceParser(tokenStream)
-	bpftraceParser.RemoveErrorListeners()
-	bpftraceParser.AddErrorListener(errorListener)
 
-	// Parse the program
-	tree := bpftraceParser.Program()
-	if err := errorListener.Err(); err != nil {
-		return "", err
+	tree, sllErr := parseProgramWithMode(tokenStream, antlr.PredictionModeSLL)
+	if lexerErr := errorListener.Err(); lexerErr == nil && sllErr == nil {
+		return tree, nil
 	}
 
-	// Create and use the visitor
-	visitor := NewASTVisitor(f)
-	visitor.Visit(tree)
+	tokenStream.Seek(0)
+	tree, llErr := parseProgramWithMode(tokenStream, antlr.PredictionModeLL)
 
-	return strings.TrimRightFunc(f.output.String(), unicode.IsSpace), nil
+	if lexerErr := errorListener.Err(); lexerErr != nil {
+		return nil, lexerErr
+	}
+	if llErr != nil {
+		return nil, llErr
+	}
+	return tree, nil
+}
+
+func parseProgramWithMode(tokenStream *antlr.CommonTokenStream, mode int) (parser.IProgramContext, error) {
+	errorListener := newSyntaxErrorListener()
+
+	p := parser.NewbpftraceParser(tokenStream)
+	p.RemoveErrorListeners()
+	p.AddErrorListener(errorListener)
+	p.GetInterpreter().SetPredictionMode(mode)
+
+	tree := p.Program()
+	if err := errorListener.Err(); err != nil {
+		return nil, err
+	}
+	return tree, nil
 }
 
 // writeString writes a string to the output

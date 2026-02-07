@@ -3,6 +3,7 @@ package lsp
 import (
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fanyang89/bpftrace-formatter/config"
@@ -27,6 +28,19 @@ func TestFileURIToPath_Errors(t *testing.T) {
 	}
 }
 
+func TestFileURIToPath_EmptySchemeErrorMessage(t *testing.T) {
+	_, err := fileURIToPath("no-scheme-path")
+	if err == nil {
+		t.Fatalf("expected error for URI without scheme")
+	}
+	if !strings.Contains(err.Error(), "missing uri scheme") {
+		t.Fatalf("expected 'missing uri scheme' in error, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no-scheme-path") {
+		t.Fatalf("expected URI in error message, got %q", err.Error())
+	}
+}
+
 func TestFileURIToPath_NonFileScheme(t *testing.T) {
 	got, err := fileURIToPath("untitled:Untitled-1")
 	if err != nil {
@@ -34,6 +48,19 @@ func TestFileURIToPath_NonFileScheme(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("fileURIToPath = %q, want empty string", got)
+	}
+}
+
+func TestFileURIToPath_VscodeRemote(t *testing.T) {
+	uri := "vscode-remote://ssh-remote+host/home/user/workspace/test.bt"
+
+	got, err := fileURIToPath(uri)
+	if err != nil {
+		t.Fatalf("fileURIToPath: %v", err)
+	}
+	want := filepath.FromSlash("/home/user/workspace/test.bt")
+	if got != want {
+		t.Fatalf("fileURIToPath = %q, want %q", got, want)
 	}
 }
 
@@ -100,6 +127,58 @@ func TestDocumentStoreOpen_NonFileURI(t *testing.T) {
 	}
 	if doc.Path != "" {
 		t.Fatalf("path = %q, want empty string", doc.Path)
+	}
+}
+
+func TestDocumentStoreAllDocs(t *testing.T) {
+	store := NewDocumentStore(nil)
+	tmpDir := t.TempDir()
+
+	uri1 := (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(tmpDir, "a.bt"))}).String()
+	uri2 := (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(tmpDir, "b.bt"))}).String()
+
+	if _, err := store.Open(uri1, 1, "kprobe:sys_clone { @x = count(); }\n"); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := store.Open(uri2, 3, "kprobe:sys_clone { @x = count( }\n"); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	snapshots := store.AllDocs()
+	if len(snapshots) != 2 {
+		t.Fatalf("AllDocs: expected 2 snapshots, got %d", len(snapshots))
+	}
+
+	byURI := make(map[string]DocSnapshot)
+	for _, s := range snapshots {
+		byURI[s.URI] = s
+	}
+
+	s1, ok := byURI[uri1]
+	if !ok {
+		t.Fatalf("AllDocs: missing %s", uri1)
+	}
+	if s1.Version != 1 {
+		t.Fatalf("AllDocs: version = %d, want 1", s1.Version)
+	}
+
+	s2, ok := byURI[uri2]
+	if !ok {
+		t.Fatalf("AllDocs: missing %s", uri2)
+	}
+	if s2.Version != 3 {
+		t.Fatalf("AllDocs: version = %d, want 3", s2.Version)
+	}
+	if len(s2.Diagnostics) == 0 {
+		t.Fatalf("AllDocs: expected diagnostics for invalid document")
+	}
+}
+
+func TestDocumentStoreAllDocs_Empty(t *testing.T) {
+	store := NewDocumentStore(nil)
+	snapshots := store.AllDocs()
+	if len(snapshots) != 0 {
+		t.Fatalf("AllDocs: expected 0 snapshots, got %d", len(snapshots))
 	}
 }
 
