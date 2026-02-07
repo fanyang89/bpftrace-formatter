@@ -1,0 +1,139 @@
+{
+  "name": "bpftrace",
+  "scopeName": "source.bpftrace",
+  "patterns": [
+    { "include": "#shebang" },
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#preprocessor" },
+    { "include": "#probes" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#variables" },
+    { "include": "#maps" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "shebang": {
+      "patterns": [
+        {
+          "name": "comment.line.shebang.bpftrace",
+          "match": "^#!.*$"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.bpftrace",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.bpftrace",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.bpftrace",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.bpftrace",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.bpftrace",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.bpftrace",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.bpftrace",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b|\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b"
+        }
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.bpftrace",
+          "match": "^\\s*#\\s*(?:include|define|undef|ifdef|ifndef|if|elif|else|endif|error|pragma)\\b.*$"
+        }
+      ]
+    },
+    "probes": {
+      "patterns": [
+        {
+          "name": "keyword.other.probe.bpftrace",
+          "match": "\\b(?:BEGIN|END|kprobe|kretprobe|uprobe|uretprobe|tracepoint|rawtracepoint|profile|interval|hardware|software|usdt|watchpoint|asyncwatchpoint|kfunc|kretfunc)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.bpftrace",
+          "match": "\\b(?:if|else|for|while|return|break|continue|struct|union|enum|sizeof|macro|config)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.bpftrace",
+          "match": "\\b(?:bool|char|short|int|long|float|double|void|u8|u16|u32|u64|s8|s16|s32|s64|uint|ulong|ushort|uintptr|size_t|pid_t|tid_t)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.bpftrace",
+          "match": "\\b(?:printf|print|clear|delete|exit|join|str|strlen|strcmp|strncmp|sprintf|time|time_ns|system|cat|kstack|ustack|stack|sym|usym|ksym|kaddr|uaddr|reg|probe|func|count|sum|avg|min|max|stats|hist|lhist|quantize|sample|percpu)\\b"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.language.bpftrace",
+          "match": "\\b(?:pid|tid|uid|gid|cpu|comm|nsecs|elapsed|retval|args|curtask|username|cpid)\\b"
+        }
+      ]
+    },
+    "maps": {
+      "patterns": [
+        {
+          "name": "variable.other.map.bpftrace",
+          "match": "@[_A-Za-z][_A-Za-z0-9]*"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.bpftrace",
+          "match": "->|\\+\\+|--|<<=|>>=|==|!=|<=|>=|<<|>>|&&|\\|\\||\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=|\\+|-|\\*|/|%|&|\\||\\^|!|~|\\?|:"
+        }
+      ]
+    }
+  }
+}

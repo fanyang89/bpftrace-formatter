@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -21,13 +22,22 @@ type formatResult struct {
 func formatWithTimeout(doc *Document, cfg *config.Config, timeout time.Duration) (string, error) {
 	ch := make(chan formatResult, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- formatResult{err: fmt.Errorf("formatter panic: %v", r)}
+			}
+		}()
+		start := time.Now()
 		f := formatter.NewASTFormatter(cfg)
 		// Reuse the parse tree from didOpen/didChange when available,
 		// avoiding a redundant ANTLR parse.
 		if doc.ParseResult != nil && doc.ParseResult.Tree != nil && len(doc.ParseResult.Diagnostics) == 0 {
-			ch <- formatResult{text: f.FormatTree(doc.ParseResult.Tree), err: nil}
+			text := f.FormatTree(doc.ParseResult.Tree)
+			log.Printf("[format] FormatTree took %s", time.Since(start))
+			ch <- formatResult{text: text}
 		} else {
 			formatted, err := f.Format(doc.Text)
+			log.Printf("[format] Format took %s", time.Since(start))
 			ch <- formatResult{text: formatted, err: err}
 		}
 	}()

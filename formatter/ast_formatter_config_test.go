@@ -270,6 +270,31 @@ func TestASTFormatter_LeadingCommentIndentPreserved(t *testing.T) {
 	}
 }
 
+func TestASTFormatter_CommentBetweenProbes(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	input := "BEGIN{exit();}\n// next probe\nEND{exit();}"
+	got, err := NewASTFormatter(cfg).Format(input)
+	if err != nil {
+		t.Fatalf("Format returned error: %v", err)
+	}
+
+	want := "BEGIN\n" +
+		"{\n" +
+		"    exit();\n" +
+		"}\n" +
+		"\n" +
+		"// next probe\n" +
+		"END\n" +
+		"{\n" +
+		"    exit();\n" +
+		"}"
+
+	if got != want {
+		t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, want)
+	}
+}
+
 func TestASTFormatter_BreakLongStatements(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.LineBreaks.MaxLineLength = 20

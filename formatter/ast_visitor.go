@@ -10,8 +10,9 @@ import (
 // ASTVisitor implements the visitor pattern for the bpftrace AST
 type ASTVisitor struct {
 	*parser.BasebpftraceListener
-	formatter *ASTFormatter
-	lastProbe bool
+	formatter                *ASTFormatter
+	lastProbe                bool
+	suppressNextProbeSpacing bool
 }
 
 // NewASTVisitor creates a new AST visitor
@@ -197,18 +198,24 @@ func (v *ASTVisitor) visitContent(ctx *parser.ContentContext) {
 	for i := 0; i < ctx.GetChildCount(); i++ {
 		child := ctx.GetChild(i)
 
-		// Handle spacing between probes
-		if probe, ok := child.(*parser.ProbeContext); ok {
-			if v.lastProbe {
+		switch node := child.(type) {
+		case *parser.ProbeContext:
+			if v.lastProbe && !v.suppressNextProbeSpacing {
 				v.formatter.writeEmptyLines(v.formatter.config.LineBreaks.EmptyLinesBetweenProbes)
 			}
-			v.Visit(probe)
+			v.Visit(node)
 			v.lastProbe = true
-		} else {
-			v.Visit(child)
-			if _, ok := child.(*parser.CommentContext); !ok {
-				v.lastProbe = false
+			v.suppressNextProbeSpacing = false
+		case *parser.CommentContext:
+			if v.lastProbe && !v.suppressNextProbeSpacing && v.isLeadingCommentForProbe(ctx, i) && v.isCommentRunStart(ctx, i) {
+				v.formatter.writeEmptyLines(v.formatter.config.LineBreaks.EmptyLinesBetweenProbes)
+				v.suppressNextProbeSpacing = true
 			}
+			v.Visit(node)
+		default:
+			v.Visit(child)
+			v.lastProbe = false
+			v.suppressNextProbeSpacing = false
 		}
 	}
 }
@@ -763,6 +770,28 @@ func nextInlineConfigComment(ctx *parser.Config_blockContext, start int) (*parse
 		}
 	}
 	return nil, -1
+}
+
+func (v *ASTVisitor) isLeadingCommentForProbe(ctx *parser.ContentContext, index int) bool {
+	for i := index; i < ctx.GetChildCount(); i++ {
+		switch ctx.GetChild(i).(type) {
+		case *parser.CommentContext:
+			continue
+		case *parser.ProbeContext:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func (v *ASTVisitor) isCommentRunStart(ctx *parser.ContentContext, index int) bool {
+	if index == 0 {
+		return true
+	}
+	_, ok := ctx.GetChild(index - 1).(*parser.CommentContext)
+	return !ok
 }
 
 // visitLogicalOrExpression visits a logical OR expression
