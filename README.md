@@ -1,5 +1,7 @@
 # btfmt
 
+[English](README.md) | [中文](README_zh-CN.md)
+
 A formatter for bpftrace scripts with VS Code integration.
 
 ## Features

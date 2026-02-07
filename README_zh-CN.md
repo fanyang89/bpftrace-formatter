@@ -1,5 +1,7 @@
 # btfmt
 
+[English](README.md) | [中文](README_zh-CN.md)
+
 bpftrace 脚本格式化工具，支持 VS Code 集成。
 
 ## 功能特性
