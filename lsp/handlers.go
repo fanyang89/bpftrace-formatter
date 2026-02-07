@@ -70,16 +70,21 @@ func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
 	}
 
 	if configSupported.Load() {
-		section := "btfmt"
-		params := protocol.ConfigurationParams{
-			Items: []protocol.ConfigurationItem{{Section: &section}},
-		}
-		var result []any
-		context.Call(protocol.ServerWorkspaceConfiguration, params, &result)
-		if settings := settingsFromConfigurationResult(result); settings != nil {
-			configResolver.SetSettings(settings)
-			return nil
-		}
+		// Fetch configuration asynchronously to avoid blocking the message loop.
+		// A synchronous call here would deadlock because the response arrives
+		// on the same message loop that is waiting for this handler to return.
+		go func() {
+			section := "btfmt"
+			params := protocol.ConfigurationParams{
+				Items: []protocol.ConfigurationItem{{Section: &section}},
+			}
+			var result []any
+			context.Call(protocol.ServerWorkspaceConfiguration, params, &result)
+			if settings := settingsFromConfigurationResult(result); settings != nil {
+				configResolver.SetSettings(settings)
+			}
+		}()
+		return nil
 	}
 
 	if settings := getInitSettings(); settings != nil {
