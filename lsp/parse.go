@@ -43,25 +43,38 @@ func (l *syntaxErrorListener) SyntaxError(_ antlr.Recognizer, offendingSymbol an
 }
 
 func ParseDocument(input string) *ParseResult {
-	listener := newSyntaxErrorListener()
+	lexerListener := newSyntaxErrorListener()
 	inputStream := antlr.NewInputStream(input)
 	lexer := parser.NewbpftraceLexer(inputStream)
 	lexer.RemoveErrorListeners()
-	lexer.AddErrorListener(listener)
+	lexer.AddErrorListener(lexerListener)
 	stream := antlr.NewCommonTokenStream(lexer, 0)
 
-	p := parser.NewbpftraceParser(stream)
-	p.RemoveErrorListeners()
-	p.AddErrorListener(listener)
-	p.GetInterpreter().SetPredictionMode(antlr.PredictionModeSLL)
-
-	tree := p.Program()
+	tree, parserErrors := parseProgram(stream, antlr.PredictionModeSLL)
+	if len(parserErrors) > 0 {
+		stream.Seek(0)
+		llTree, llErrors := parseProgram(stream, antlr.PredictionModeLL)
+		tree = llTree
+		parserErrors = llErrors
+	}
+	allErrors := append([]parseError{}, lexerListener.errors...)
+	allErrors = append(allErrors, parserErrors...)
 
 	return &ParseResult{
 		Tree:        tree,
 		Tokens:      stream,
-		Diagnostics: diagnosticsFromErrors(input, listener.errors),
+		Diagnostics: diagnosticsFromErrors(input, allErrors),
 	}
+}
+
+func parseProgram(stream *antlr.CommonTokenStream, mode int) (parser.IProgramContext, []parseError) {
+	listener := newSyntaxErrorListener()
+	p := parser.NewbpftraceParser(stream)
+	p.RemoveErrorListeners()
+	p.AddErrorListener(listener)
+	p.GetInterpreter().SetPredictionMode(mode)
+	tree := p.Program()
+	return tree, listener.errors
 }
 
 func diagnosticsFromErrors(input string, errors []parseError) []protocol.Diagnostic {
