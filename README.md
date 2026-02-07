@@ -26,14 +26,14 @@ The extension includes the btfmt binary - no additional installation required.
 
 Download the pre-built binary from [Releases](https://github.com/fanyang89/bpftrace-formatter/releases):
 
-| Platform | File |
-|----------|------|
-| Linux x64 | `btfmt-linux-amd64.tar.gz` |
-| Linux ARM64 | `btfmt-linux-arm64.tar.gz` |
-| macOS x64 | `btfmt-darwin-amd64.tar.gz` |
-| macOS ARM64 | `btfmt-darwin-arm64.tar.gz` |
-| Windows x64 | `btfmt-windows-amd64.zip` |
-| Windows ARM64 | `btfmt-windows-arm64.zip` |
+| Platform      | File                        |
+| ------------- | --------------------------- |
+| Linux x64     | `btfmt-linux-amd64.tar.gz`  |
+| Linux ARM64   | `btfmt-linux-arm64.tar.gz`  |
+| macOS x64     | `btfmt-darwin-amd64.tar.gz` |
+| macOS ARM64   | `btfmt-darwin-arm64.tar.gz` |
+| Windows x64   | `btfmt-windows-amd64.zip`   |
+| Windows ARM64 | `btfmt-windows-arm64.zip`   |
 
 Extract and add to your PATH:
 
@@ -145,17 +145,17 @@ Example `.btfmt.json`:
 
 ### Configuration Options
 
-| Section | Option | Default | Description |
-|---------|--------|---------|-------------|
-| `indent` | `size` | 4 | Spaces/tabs per indent level |
-| `indent` | `use_spaces` | true | Use spaces instead of tabs |
-| `spacing` | `around_operators` | true | Space around `=`, `+`, `-`, etc. |
-| `spacing` | `around_commas` | true | Space after commas |
-| `spacing` | `before_block_start` | true | Space before `{` |
-| `spacing` | `after_keywords` | true | Space after `if`, `while`, etc. |
-| `line_breaks` | `empty_lines_between_probes` | 1 | Empty lines between probe blocks |
-| `line_breaks` | `empty_lines_after_shebang` | 1 | Empty lines after shebang |
-| `blocks` | `brace_style` | "next_line" | `"same_line"`, `"next_line"`, or `"gnu"` |
+| Section       | Option                       | Default     | Description                              |
+| ------------- | ---------------------------- | ----------- | ---------------------------------------- |
+| `indent`      | `size`                       | 4           | Spaces/tabs per indent level             |
+| `indent`      | `use_spaces`                 | true        | Use spaces instead of tabs               |
+| `spacing`     | `around_operators`           | true        | Space around `=`, `+`, `-`, etc.         |
+| `spacing`     | `around_commas`              | true        | Space after commas                       |
+| `spacing`     | `before_block_start`         | true        | Space before `{`                         |
+| `spacing`     | `after_keywords`             | true        | Space after `if`, `while`, etc.          |
+| `line_breaks` | `empty_lines_between_probes` | 1           | Empty lines between probe blocks         |
+| `line_breaks` | `empty_lines_after_shebang`  | 1           | Empty lines after shebang                |
+| `blocks`      | `brace_style`                | "next_line" | `"same_line"`, `"next_line"`, or `"gnu"` |
 
 ## VS Code Extension
 
@@ -167,10 +167,10 @@ The VS Code extension provides:
 
 ### Extension Settings
 
-| Setting | Default | Description |
-|---------|---------|-------------|
+| Setting            | Default | Description                                           |
+| ------------------ | ------- | ----------------------------------------------------- |
 | `btfmt.serverPath` | `btfmt` | Path to btfmt binary (uses bundled binary by default) |
-| `btfmt.configPath` | `""` | Path to `.btfmt.json` configuration file |
+| `btfmt.configPath` | `""`    | Path to `.btfmt.json` configuration file              |
 
 ## License
 
