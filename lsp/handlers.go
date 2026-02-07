@@ -155,7 +155,7 @@ func publishDiagnostics(context *glsp.Context, uri string, version *protocol.UIn
 	context.Notify(protocol.ServerTextDocumentPublishDiagnostics, params)
 }
 
-func didChangeConfiguration(_ *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
+func didChangeConfiguration(context *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
 	if params == nil {
 		return nil
 	}
@@ -166,7 +166,15 @@ func didChangeConfiguration(_ *glsp.Context, params *protocol.DidChangeConfigura
 	}
 
 	configResolver.SetSettings(normalizeSettingsMap(settings))
-	return documentStore.RefreshConfigs()
+	if err := documentStore.RefreshConfigs(); err != nil {
+		return err
+	}
+
+	for _, snap := range documentStore.AllDocs() {
+		version := protocol.UInteger(snap.Version)
+		publishDiagnostics(context, snap.URI, &version, snap.Diagnostics)
+	}
+	return nil
 }
 
 func didFormat(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {

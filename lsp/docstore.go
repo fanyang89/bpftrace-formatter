@@ -56,6 +56,32 @@ func (s *DocumentStore) Get(uri string) (*Document, bool) {
 	return doc, ok
 }
 
+// DocSnapshot holds a read-only snapshot of a document's key fields.
+type DocSnapshot struct {
+	URI         string
+	Version     int32
+	Diagnostics []protocol.Diagnostic
+}
+
+// AllDocs returns a snapshot of all open documents.
+func (s *DocumentStore) AllDocs() []DocSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshots := make([]DocSnapshot, 0, len(s.docs))
+	for _, doc := range s.docs {
+		if doc == nil {
+			continue
+		}
+		snapshots = append(snapshots, DocSnapshot{
+			URI:         doc.URI,
+			Version:     doc.Version,
+			Diagnostics: doc.Diagnostics,
+		})
+	}
+	return snapshots
+}
+
 func (s *DocumentStore) RefreshConfigs() error {
 	if s.resolver == nil {
 		return nil
@@ -131,7 +157,18 @@ func fileURIToPath(uri string) (string, error) {
 		return "", err
 	}
 	if parsed.Scheme == "" {
-		return "", fmt.Errorf("unsupported uri scheme: %s", parsed.Scheme)
+		return "", fmt.Errorf("missing uri scheme in %q", uri)
+	}
+	if parsed.Scheme == "vscode-remote" {
+		if parsed.Path == "" {
+			return "", fmt.Errorf("empty uri path")
+		}
+		unescapedPath, err := url.PathUnescape(parsed.Path)
+		if err != nil {
+			return "", err
+		}
+		unescapedPath = trimLeadingDriveSlash(unescapedPath)
+		return filepath.FromSlash(unescapedPath), nil
 	}
 	if parsed.Scheme != "file" {
 		return "", nil
