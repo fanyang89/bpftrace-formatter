@@ -86,6 +86,14 @@ func resetFormatTasks() {
 	formatTasks = map[string]*formatTask{}
 }
 
+func removeFormatTaskIfCurrent(uri string, task *formatTask) {
+	formatTasksMu.Lock()
+	defer formatTasksMu.Unlock()
+	if current, exists := formatTasks[uri]; exists && current == task {
+		delete(formatTasks, uri)
+	}
+}
+
 func formatWithTimeout(uri string, doc *Document, cfg *config.Config, timeout time.Duration) (string, error) {
 	task, reused := getOrStartFormatTask(uri, doc, cfg)
 	if reused && task.version != doc.Version {
@@ -98,6 +106,9 @@ func formatWithTimeout(uri string, doc *Document, cfg *config.Config, timeout ti
 	case <-task.done:
 		return task.result.text, task.result.err
 	case <-timer.C:
+		// If this caller timed out, drop the task entry so follow-up requests
+		// can retry instead of being blocked by a potentially stuck worker.
+		removeFormatTaskIfCurrent(uri, task)
 		return "", fmt.Errorf("formatting timed out after %s", timeout)
 	}
 }
