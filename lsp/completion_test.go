@@ -106,6 +106,35 @@ func TestDefaultCompletions(t *testing.T) {
 	}
 }
 
+func TestGetMapAssignmentPrefix(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		wantPrefix string
+		wantOk     bool
+	}{
+		{"right after =", "@x = ", "", true},
+		{"typing function", "@x = cou", "cou", true},
+		{"with spaces", "@x =   sum", "sum", true},
+		{"no @", "x = count", "", false},
+		{"has operator", "@x = 1 + ", "", false},
+		{"has paren", "@x = foo(", "", false},
+		{"complete call", "@x = count()", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prefix, ok := getMapAssignmentPrefix(tt.line)
+			if ok != tt.wantOk {
+				t.Errorf("getMapAssignmentPrefix(%q) ok = %v, want %v", tt.line, ok, tt.wantOk)
+			}
+			if ok && prefix != tt.wantPrefix {
+				t.Errorf("getMapAssignmentPrefix(%q) prefix = %q, want %q", tt.line, prefix, tt.wantPrefix)
+			}
+		})
+	}
+}
+
 func TestDetermineCompletionContext(t *testing.T) {
 	tests := []struct {
 		name     string

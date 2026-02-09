@@ -227,8 +227,10 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 
 	// Check if we're right after = in a map assignment (for map function completion)
 	// Pattern: @map = <cursor> or @map[key] = <cursor>
-	if insideBlock && isMapAssignmentContext(trimmed) {
-		return completionContext{kind: contextMapFunction, prefix: extractLastWord(trimmed)}
+	if insideBlock {
+		if prefix, ok := getMapAssignmentPrefix(trimmed); ok {
+			return completionContext{kind: contextMapFunction, prefix: prefix}
+		}
 	}
 
 	// Check if we're at the start of a probe definition
@@ -245,37 +247,38 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 	return completionContext{kind: contextUnknown}
 }
 
-// isMapAssignmentContext checks if cursor is right after = in a map assignment
-// and user is typing a map function name (or nothing yet)
-func isMapAssignmentContext(line string) bool {
+// getMapAssignmentPrefix checks if cursor is right after = in a map assignment
+// and returns the prefix being typed (empty string if just after =).
+// Returns (prefix, true) if in map assignment context, ("", false) otherwise.
+func getMapAssignmentPrefix(line string) (string, bool) {
 	// Find the last = in the line
 	eqIdx := strings.LastIndex(line, "=")
 	if eqIdx < 0 {
-		return false
+		return "", false
 	}
 
 	// Check there's a @ before the =
 	beforeEq := line[:eqIdx]
 	if !strings.Contains(beforeEq, "@") {
-		return false
+		return "", false
 	}
 
 	// Get what's after the =
 	afterEq := strings.TrimLeft(line[eqIdx+1:], " \t")
 
-	// If empty or only contains word characters (typing function name), it's map function context
+	// If empty, user just typed = and we should show all map functions
 	if afterEq == "" {
-		return true
+		return "", true
 	}
 
 	// Check if user is typing a simple identifier (potential map function name)
 	// Should not contain operators, parentheses with content, etc.
 	for _, r := range afterEq {
 		if !isWordChar(r) {
-			return false
+			return "", false
 		}
 	}
-	return true
+	return afterEq, true
 }
 
 func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool {
