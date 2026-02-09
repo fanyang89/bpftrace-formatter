@@ -204,26 +204,31 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 	currentLine := lines[len(lines)-1]
 	trimmed := strings.TrimLeft(currentLine, " \t")
 
-	// Check for @ prefix (map)
+	// Check if inside a block first to get proper context
+	insideBlock := isInsideBlock(textBefore)
+
+	// Check for @ prefix (map) - only if cursor is right after @ or typing map name
 	if lastAt := strings.LastIndex(trimmed, "@"); lastAt >= 0 {
 		afterAt := trimmed[lastAt:]
-		// Check if we're in a map context without brackets yet
-		if !strings.Contains(afterAt, "[") || strings.Count(afterAt, "[") <= strings.Count(afterAt, "]") {
-			// After @ is the map name
-			if strings.HasSuffix(afterAt, "=") || strings.Contains(afterAt, " = ") {
-				// After assignment, suggest functions for map aggregation
-				return completionContext{kind: contextMapFunction, prefix: extractLastWord(trimmed)}
-			}
+		// Only suggest map names if we're typing immediately after @
+		// i.e., no space or operator after @
+		if !strings.ContainsAny(afterAt, " \t=[]();,+-*/<>!&|") {
 			return completionContext{kind: contextMapName, prefix: strings.TrimPrefix(afterAt, "@")}
 		}
 	}
 
-	// Check for $ prefix (variable)
+	// Check for $ prefix (variable) - only if cursor is right after $ or typing variable name
 	if lastDollar := strings.LastIndex(trimmed, "$"); lastDollar >= 0 {
 		afterDollar := trimmed[lastDollar:]
-		if !strings.Contains(afterDollar, " ") {
+		if !strings.ContainsAny(afterDollar, " \t=[]();,+-*/<>!&|") {
 			return completionContext{kind: contextVariable, prefix: strings.TrimPrefix(afterDollar, "$")}
 		}
+	}
+
+	// Check if we're right after = in a map assignment (for map function completion)
+	// Pattern: @map = <cursor> or @map[key] = <cursor>
+	if insideBlock && isMapAssignmentContext(trimmed) {
+		return completionContext{kind: contextMapFunction, prefix: extractLastWord(trimmed)}
 	}
 
 	// Check if we're at the start of a probe definition
@@ -232,12 +237,45 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 	}
 
 	// Check if inside a block (for statements/function calls)
-	if isInsideBlock(textBefore) {
+	if insideBlock {
 		lastWord := extractLastWord(trimmed)
 		return completionContext{kind: contextStatement, prefix: lastWord}
 	}
 
 	return completionContext{kind: contextUnknown}
+}
+
+// isMapAssignmentContext checks if cursor is right after = in a map assignment
+// and user is typing a map function name (or nothing yet)
+func isMapAssignmentContext(line string) bool {
+	// Find the last = in the line
+	eqIdx := strings.LastIndex(line, "=")
+	if eqIdx < 0 {
+		return false
+	}
+
+	// Check there's a @ before the =
+	beforeEq := line[:eqIdx]
+	if !strings.Contains(beforeEq, "@") {
+		return false
+	}
+
+	// Get what's after the =
+	afterEq := strings.TrimLeft(line[eqIdx+1:], " \t")
+
+	// If empty or only contains word characters (typing function name), it's map function context
+	if afterEq == "" {
+		return true
+	}
+
+	// Check if user is typing a simple identifier (potential map function name)
+	// Should not contain operators, parentheses with content, etc.
+	for _, r := range afterEq {
+		if !isWordChar(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool {
