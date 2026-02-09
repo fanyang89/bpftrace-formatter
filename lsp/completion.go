@@ -333,10 +333,12 @@ func mapCompletions(doc *Document, prefix string) []protocol.CompletionItem {
 	for _, name := range maps {
 		if prefix == "" || strings.HasPrefix(name, prefix) {
 			detail := "map"
+			insertText := name // Insert only the name, not the @ prefix
 			items = append(items, protocol.CompletionItem{
-				Label:  "@" + name,
-				Kind:   &kindVariable,
-				Detail: &detail,
+				Label:      "@" + name,
+				Kind:       &kindVariable,
+				Detail:     &detail,
+				InsertText: &insertText,
 			})
 		}
 	}
@@ -353,10 +355,12 @@ func variableCompletions(doc *Document, prefix string) []protocol.CompletionItem
 	for _, name := range vars {
 		if prefix == "" || strings.HasPrefix(name, prefix) {
 			detail := "variable"
+			insertText := name // Insert only the name, not the $ prefix
 			items = append(items, protocol.CompletionItem{
-				Label:  "$" + name,
-				Kind:   &kindVariable,
-				Detail: &detail,
+				Label:      "$" + name,
+				Kind:       &kindVariable,
+				Detail:     &detail,
+				InsertText: &insertText,
 			})
 		}
 	}
