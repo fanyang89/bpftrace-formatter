@@ -602,6 +602,78 @@ func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
 	}
 }
 
+func TestDidNavigation_MacroMapParamScopeDoesNotLeakToGlobalMap(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "macro foo(@m) { @m = count(); print(@m); }\nBEGIN { @m = sum(1); print(@m); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	globalAssignMarker := "BEGIN { @m = sum(1)"
+	globalAssignOffset := strings.Index(input, globalAssignMarker)
+	globalQueryBase := strings.LastIndex(input, "print(@m)")
+	if globalAssignOffset < 0 || globalQueryBase < 0 {
+		t.Fatalf("failed to locate global map markers in input")
+	}
+	globalAssignOffset += len("BEGIN { ")
+	globalQueryOffset := globalQueryBase + len("print(")
+
+	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDefinition: %v", err)
+	}
+
+	locations, ok := resultAny.([]protocol.Location)
+	if !ok {
+		t.Fatalf("didDefinition result type = %T, want []protocol.Location", resultAny)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("didDefinition locations = %d, want 1", len(locations))
+	}
+	if locations[0].Range.Start != PositionForOffset(input, globalAssignOffset) {
+		t.Fatalf("didDefinition start = %+v, want %+v", locations[0].Range.Start, PositionForOffset(input, globalAssignOffset))
+	}
+
+	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil {
+		t.Fatalf("didReferences: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("didReferences(include=true) = %d, want 2", len(refs))
+	}
+
+	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}, NewName: "@out"})
+	if err != nil {
+		t.Fatalf("didRename: %v", err)
+	}
+	if edit == nil {
+		t.Fatalf("expected workspace edit")
+	}
+
+	changes := edit.Changes[protocol.DocumentUri(uri)]
+	if len(changes) != 2 {
+		t.Fatalf("rename edits = %d, want 2", len(changes))
+	}
+
+	wantStarts := map[protocol.Position]struct{}{
+		PositionForOffset(input, globalAssignOffset): {},
+		PositionForOffset(input, globalQueryOffset):  {},
+	}
+	for _, change := range changes {
+		if change.NewText != "@out" {
+			t.Fatalf("rename new text = %q, want %q", change.NewText, "@out")
+		}
+		if _, ok := wantStarts[change.Range.Start]; !ok {
+			t.Fatalf("rename unexpectedly edits macro-local map usage at %+v", change.Range.Start)
+		}
+		delete(wantStarts, change.Range.Start)
+	}
+	if len(wantStarts) != 0 {
+		t.Fatalf("rename missing expected global map edits")
+	}
+}
+
 func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
 	uri := setupTestState(t)
 
@@ -704,6 +776,37 @@ func TestDidDocumentHighlight_AssignmentDetectionHandlesUnicodePrefix(t *testing
 	}
 	if readCount != 1 || writeCount != 1 {
 		t.Fatalf("expected one read and one write highlight, got read=%d write=%d", readCount, writeCount)
+	}
+}
+
+func TestDidReferences_MapAssignmentWithStringBracketKeyStillCountsDefinition(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { @m[\"[\"] = 1; print(@m[\"[\"]); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.LastIndex(input, "print(@m")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query map in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil {
+		t.Fatalf("didReferences include declaration: %v", err)
+	}
+	if len(allRefs) != 2 {
+		t.Fatalf("didReferences(include=true) = %d, want 2", len(allRefs))
+	}
+
+	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	if err != nil {
+		t.Fatalf("didReferences exclude declaration: %v", err)
+	}
+	if len(withoutDecl) != 1 {
+		t.Fatalf("didReferences(include=false) = %d, want 1", len(withoutDecl))
 	}
 }
 

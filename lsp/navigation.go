@@ -191,7 +191,7 @@ func symbolOccurrencesByIdentity(doc *Document, target symbolOccurrence) []symbo
 		if occurrence.kind != target.kind || occurrence.name != target.name {
 			continue
 		}
-		if target.kind == symbolKindVariable && occurrence.scopeKey != target.scopeKey {
+		if (target.kind == symbolKindVariable || target.kind == symbolKindMap) && occurrence.scopeKey != target.scopeKey {
 			continue
 		}
 		filtered = append(filtered, occurrence)
@@ -205,34 +205,64 @@ func collectSymbolOccurrences(doc *Document) []symbolOccurrence {
 	}
 
 	occurrences := make([]symbolOccurrence, 0)
-	var walk func(node antlr.Tree, variableScopeKey string)
-	walk = func(node antlr.Tree, variableScopeKey string) {
+	var walk func(node antlr.Tree, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string)
+	walk = func(node antlr.Tree, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string) {
 		if node == nil {
 			return
 		}
 
 		currentScopeKey := variableScopeKey
+		currentMacroMapScopeKey := macroMapScopeKey
+		currentMacroMapParamNames := macroMapParamNames
 		switch typed := node.(type) {
 		case *parser.ProbeContext:
 			currentScopeKey = variableScopeKeyForContext("probe", typed)
+			currentMacroMapScopeKey = ""
+			currentMacroMapParamNames = nil
 		case *parser.Macro_definitionContext:
 			currentScopeKey = variableScopeKeyForContext("macro", typed)
+			currentMacroMapScopeKey = currentScopeKey
+			currentMacroMapParamNames = macroMapParamSet(typed)
 		}
 
 		if terminal, ok := node.(antlr.TerminalNode); ok {
-			if occurrence, ok := symbolOccurrenceFromTerminal(doc.Text, terminal, currentScopeKey); ok {
+			if occurrence, ok := symbolOccurrenceFromTerminal(doc.Text, terminal, currentScopeKey, currentMacroMapParamNames, currentMacroMapScopeKey); ok {
 				occurrences = append(occurrences, occurrence)
 			}
 		}
 
 		for i := 0; i < node.GetChildCount(); i++ {
-			walk(node.GetChild(i), currentScopeKey)
+			walk(node.GetChild(i), currentScopeKey, currentMacroMapParamNames, currentMacroMapScopeKey)
 		}
 	}
 
-	walk(doc.ParseResult.Tree, "")
+	walk(doc.ParseResult.Tree, "", nil, "")
 	sortSymbolOccurrences(occurrences)
 	return occurrences
+}
+
+func macroMapParamSet(ctx *parser.Macro_definitionContext) map[string]struct{} {
+	if ctx == nil || ctx.Macro_params() == nil {
+		return nil
+	}
+
+	result := make(map[string]struct{})
+	for _, param := range ctx.Macro_params().AllMacro_param() {
+		if param == nil || param.MAP_NAME() == nil {
+			continue
+		}
+		kind, name, _, ok := symbolIdentityFromText(param.MAP_NAME().GetText())
+		if !ok || kind != symbolKindMap {
+			continue
+		}
+		result[name] = struct{}{}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+
+	return result
 }
 
 func variableScopeKeyForContext(prefix string, ctx antlr.ParserRuleContext) string {
@@ -253,7 +283,7 @@ func variableScopeKeyForContext(prefix string, ctx antlr.ParserRuleContext) stri
 	return fmt.Sprintf("%s:%d:%d", prefix, startIndex, stopIndex)
 }
 
-func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode, variableScopeKey string) (symbolOccurrence, bool) {
+func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string) (symbolOccurrence, bool) {
 	if terminal == nil {
 		return symbolOccurrence{}, false
 	}
@@ -276,6 +306,11 @@ func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode, vari
 	scopeKey := ""
 	if kind == symbolKindVariable {
 		scopeKey = variableScopeKey
+	}
+	if kind == symbolKindMap {
+		if _, ok := macroMapParamNames[name]; ok {
+			scopeKey = macroMapScopeKey
+		}
 	}
 
 	return symbolOccurrence{
@@ -349,8 +384,27 @@ func consumeBracketExpression(text []rune, start int) (int, bool) {
 	}
 
 	depth := 0
+	var quote rune
+	escaped := false
 	for i := start; i < len(text); i++ {
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if text[i] == '\\' {
+				escaped = true
+				continue
+			}
+			if text[i] == quote {
+				quote = 0
+			}
+			continue
+		}
+
 		switch text[i] {
+		case '\'', '"':
+			quote = text[i]
 		case '[':
 			depth++
 		case ']':
