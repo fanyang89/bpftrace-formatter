@@ -567,15 +567,21 @@ func hasPrefixMutationOperator(text []rune, tokenStart int) bool {
 		return false
 	}
 
-	if text[index-1] == '+' && text[index] == '+' {
-		return true
+	var operator rune
+	switch {
+	case text[index-1] == '+' && text[index] == '+':
+		operator = '+'
+	case text[index-1] == '-' && text[index] == '-':
+		operator = '-'
+	default:
+		return false
 	}
 
-	if text[index-1] == '-' && text[index] == '-' {
-		return true
+	if index >= 2 && text[index-2] == operator {
+		return false
 	}
 
-	return false
+	return true
 }
 
 func isASCIIWhitespaceRune(value rune) bool {

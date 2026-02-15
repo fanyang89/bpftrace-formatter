@@ -1076,6 +1076,72 @@ func TestDidDocumentHighlight_MapIncrementMutationIsWrite(t *testing.T) {
 	}
 }
 
+func TestDidNavigation_TriplePlusNeighborVariableIsReadOnly(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $a+++$b; }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryOffset := strings.Index(input, "$b")
+	if queryOffset < 0 {
+		t.Fatalf("failed to locate query variable in input")
+	}
+
+	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	if err != nil {
+		t.Fatalf("didReferences: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("didReferences(include=false) = %d, want 1", len(refs))
+	}
+
+	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDocumentHighlight: %v", err)
+	}
+	if len(highlights) != 1 {
+		t.Fatalf("highlights = %d, want 1", len(highlights))
+	}
+	if highlights[0].Kind == nil || *highlights[0].Kind != protocol.DocumentHighlightKindRead {
+		t.Fatalf("expected read highlight for $b, got %+v", highlights[0].Kind)
+	}
+}
+
+func TestDidNavigation_TripleMinusNeighborVariableIsReadOnly(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $a---$b; }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryOffset := strings.Index(input, "$b")
+	if queryOffset < 0 {
+		t.Fatalf("failed to locate query variable in input")
+	}
+
+	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	if err != nil {
+		t.Fatalf("didReferences: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("didReferences(include=false) = %d, want 1", len(refs))
+	}
+
+	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDocumentHighlight: %v", err)
+	}
+	if len(highlights) != 1 {
+		t.Fatalf("highlights = %d, want 1", len(highlights))
+	}
+	if highlights[0].Kind == nil || *highlights[0].Kind != protocol.DocumentHighlightKindRead {
+		t.Fatalf("expected read highlight for $b, got %+v", highlights[0].Kind)
+	}
+}
+
 func TestDidRename_RenamesVariableAndAcceptsSigilInNewName(t *testing.T) {
 	uri := setupTestState(t)
 
