@@ -32,8 +32,13 @@ func newHandler() protocol.Handler {
 		TextDocumentDidClose:            didClose,
 		TextDocumentFormatting:          didFormat,
 		TextDocumentHover:               didHover,
+		TextDocumentDocumentHighlight:   didDocumentHighlight,
 		TextDocumentDocumentSymbol:      didDocumentSymbol,
 		TextDocumentCompletion:          didCompletion,
+		TextDocumentDefinition:          didDefinition,
+		TextDocumentReferences:          didReferences,
+		TextDocumentRename:              didRename,
+		TextDocumentPrepareRename:       didPrepareRename,
 	}
 }
 
@@ -293,6 +298,19 @@ func didHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, e
 	return HoverForPosition(doc, params.Position), nil
 }
 
+func didDocumentHighlight(_ *glsp.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
+	if params == nil {
+		return []protocol.DocumentHighlight{}, nil
+	}
+
+	doc, ok := documentStore.Get(params.TextDocument.URI)
+	if !ok || doc == nil {
+		return []protocol.DocumentHighlight{}, nil
+	}
+
+	return documentHighlightsForPosition(doc, params.Position), nil
+}
+
 func didDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
 	if params == nil {
 		return []protocol.DocumentSymbol{}, nil
@@ -319,6 +337,68 @@ func didCompletion(_ *glsp.Context, params *protocol.CompletionParams) (any, err
 	return CompletionForPosition(doc, params.Position), nil
 }
 
+func didDefinition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+	if params == nil {
+		return []protocol.Location{}, nil
+	}
+
+	doc, ok := documentStore.Get(params.TextDocument.URI)
+	if !ok || doc == nil {
+		return []protocol.Location{}, nil
+	}
+
+	location, ok := definitionLocationForPosition(doc, params.Position)
+	if !ok {
+		return []protocol.Location{}, nil
+	}
+
+	return []protocol.Location{location}, nil
+}
+
+func didReferences(_ *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	if params == nil {
+		return []protocol.Location{}, nil
+	}
+
+	doc, ok := documentStore.Get(params.TextDocument.URI)
+	if !ok || doc == nil {
+		return []protocol.Location{}, nil
+	}
+
+	return referencesForPosition(doc, params.Position, params.Context.IncludeDeclaration), nil
+}
+
+func didRename(_ *glsp.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
+	if params == nil {
+		return nil, nil
+	}
+
+	doc, ok := documentStore.Get(params.TextDocument.URI)
+	if !ok || doc == nil {
+		return nil, nil
+	}
+
+	return renameWorkspaceEditForPosition(doc, params.Position, params.NewName)
+}
+
+func didPrepareRename(_ *glsp.Context, params *protocol.PrepareRenameParams) (any, error) {
+	if params == nil {
+		return nil, nil
+	}
+
+	doc, ok := documentStore.Get(params.TextDocument.URI)
+	if !ok || doc == nil {
+		return nil, nil
+	}
+
+	rangeValue, ok := prepareRenameRangeForPosition(doc, params.Position)
+	if !ok {
+		return nil, nil
+	}
+
+	return *rangeValue, nil
+}
+
 func getInitSettings() map[string]any {
 	initSettingsMu.Lock()
 	defer initSettingsMu.Unlock()
@@ -341,6 +421,7 @@ func exit(_ *glsp.Context) error {
 func serverCapabilities() protocol.ServerCapabilities {
 	syncKind := protocol.TextDocumentSyncKindIncremental
 	openClose := true
+	prepareRename := true
 
 	// Completion trigger characters
 	triggerChars := []string{"@", "$", ":", "."}
@@ -352,7 +433,11 @@ func serverCapabilities() protocol.ServerCapabilities {
 		},
 		DocumentFormattingProvider: true,
 		HoverProvider:              true,
+		DocumentHighlightProvider:  true,
 		DocumentSymbolProvider:     true,
+		DefinitionProvider:         true,
+		ReferencesProvider:         true,
+		RenameProvider:             &protocol.RenameOptions{PrepareProvider: &prepareRename},
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: triggerChars,
 		},
