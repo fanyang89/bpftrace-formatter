@@ -129,6 +129,7 @@ var probeTypes = []struct {
 	{"software", "software:event:count", "Software events", "software:page-faults:100 { }"},
 	{"hardware", "hardware:event:count", "Hardware events", "hardware:cache-misses:1000000 { }"},
 	{"watchpoint", "watchpoint:addr:len:mode", "Memory watchpoint", "watchpoint:0x1234:4:rw { }"},
+	{"asyncwatchpoint", "asyncwatchpoint:addr:len:mode", "Asynchronous memory watchpoint", "asyncwatchpoint:0x1234:4:rw { }"},
 }
 
 // keywords defines bpftrace keywords
@@ -461,7 +462,7 @@ func mapCompletions(doc *Document, prefix string) []protocol.CompletionItem {
 func variableCompletions(doc *Document, prefix string) []protocol.CompletionItem {
 	// Collect existing variable names from the document
 	vars := collectVariableNames(doc)
-	items := make([]protocol.CompletionItem, 0, len(vars)+len(builtinFunctions))
+	items := make([]protocol.CompletionItem, 0, len(vars))
 
 	// Add user-defined variables
 	for _, name := range vars {
@@ -477,18 +478,23 @@ func variableCompletions(doc *Document, prefix string) []protocol.CompletionItem
 		}
 	}
 
-	// Add built-in variables
+	return items
+}
+
+func constantCompletions(prefix string) []protocol.CompletionItem {
+	items := make([]protocol.CompletionItem, 0, len(builtinFunctions))
+
 	for _, f := range builtinFunctions {
-		// Only add if it looks like a variable (no parentheses in detail)
-		if !strings.Contains(f.detail, "(") {
-			if prefix == "" || strings.HasPrefix(f.name, prefix) {
-				items = append(items, protocol.CompletionItem{
-					Label:         f.name,
-					Kind:          &kindConstant,
-					Detail:        &f.detail,
-					Documentation: f.doc,
-				})
-			}
+		if strings.Contains(f.detail, "(") {
+			continue
+		}
+		if prefix == "" || strings.HasPrefix(f.name, prefix) {
+			items = append(items, protocol.CompletionItem{
+				Label:         f.name,
+				Kind:          &kindConstant,
+				Detail:        &f.detail,
+				Documentation: f.doc,
+			})
 		}
 	}
 
@@ -552,6 +558,9 @@ func statementCompletions(prefix string) []protocol.CompletionItem {
 	// Add map functions
 	items = append(items, mapFunctionCompletions(prefix)...)
 
+	// Add built-in constants (e.g. pid/tid/uid)
+	items = append(items, constantCompletions(prefix)...)
+
 	return items
 }
 
@@ -572,6 +581,9 @@ func defaultCompletions() []protocol.CompletionItem {
 			})
 		}
 	}
+
+	// Constants
+	items = append(items, constantCompletions("")...)
 
 	return items
 }

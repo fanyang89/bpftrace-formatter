@@ -18,10 +18,17 @@ func TestProbeTypeCompletions(t *testing.T) {
 		found[item.Label] = true
 	}
 
-	expected := []string{"BEGIN", "END", "kprobe", "kretprobe", "tracepoint", "uprobe"}
+	expected := []string{"BEGIN", "END", "kprobe", "kretprobe", "tracepoint", "uprobe", "asyncwatchpoint"}
 	for _, e := range expected {
 		if !found[e] {
 			t.Errorf("expected probe type %q not found", e)
+		}
+	}
+
+	notExpected := []string{"kfunc", "kretfunc", "iter", "rawtracepoint"}
+	for _, e := range notExpected {
+		if found[e] {
+			t.Errorf("unexpected unsupported probe type %q found", e)
 		}
 	}
 }
@@ -91,10 +98,25 @@ func TestStatementCompletions(t *testing.T) {
 		found[item.Label] = true
 	}
 
-	expected := []string{"if", "else", "while", "for", "return"}
+	expected := []string{"if", "else", "while", "for", "return", "pid"}
 	for _, e := range expected {
 		if !found[e] {
-			t.Errorf("expected keyword %q not found", e)
+			t.Errorf("expected completion %q not found", e)
+		}
+	}
+}
+
+func TestVariableCompletionsDoesNotIncludeBuiltinConstants(t *testing.T) {
+	text := `kprobe:foo {
+		$var = 1;
+	}`
+	parseResult := ParseDocument(text)
+	doc := &Document{Text: text, ParseResult: parseResult}
+
+	items := variableCompletions(doc, "")
+	for _, item := range items {
+		if item.Label == "pid" || item.Label == "tid" {
+			t.Fatalf("unexpected builtin constant %q in variable completions", item.Label)
 		}
 	}
 }
