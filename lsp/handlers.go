@@ -31,6 +31,7 @@ func newHandler() protocol.Handler {
 		TextDocumentFormatting:          didFormat,
 		TextDocumentHover:               didHover,
 		TextDocumentDocumentSymbol:      didDocumentSymbol,
+		TextDocumentCompletion:          didCompletion,
 	}
 }
 
@@ -225,6 +226,19 @@ func didDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (
 	return DocumentSymbols(doc), nil
 }
 
+func didCompletion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+	if params == nil {
+		return []protocol.CompletionItem{}, nil
+	}
+
+	doc, ok := documentStore.Get(params.TextDocument.URI)
+	if !ok || doc == nil {
+		return defaultCompletions(), nil
+	}
+
+	return CompletionForPosition(doc, params.Position), nil
+}
+
 func getInitSettings() map[string]any {
 	initSettingsMu.Lock()
 	defer initSettingsMu.Unlock()
@@ -248,6 +262,9 @@ func serverCapabilities() protocol.ServerCapabilities {
 	syncKind := protocol.TextDocumentSyncKindFull
 	openClose := true
 
+	// Completion trigger characters
+	triggerChars := []string{"@", "$", ":", "."}
+
 	return protocol.ServerCapabilities{
 		TextDocumentSync: &protocol.TextDocumentSyncOptions{
 			OpenClose: &openClose,
@@ -256,5 +273,8 @@ func serverCapabilities() protocol.ServerCapabilities {
 		DocumentFormattingProvider: true,
 		HoverProvider:              true,
 		DocumentSymbolProvider:     true,
+		CompletionProvider: &protocol.CompletionOptions{
+			TriggerCharacters: triggerChars,
+		},
 	}
 }
