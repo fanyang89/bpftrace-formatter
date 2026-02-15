@@ -237,7 +237,7 @@ func collectSymbolOccurrences(doc *Document) []symbolOccurrence {
 			currentMacroMapParamNames = macroMapParamSet(typed)
 			currentMacroParamDeclarationTokenIndexes = macroParamDeclarationTokenIndexSet(typed)
 		case *parser.For_statementContext:
-			currentMacroParamDeclarationTokenIndexes = addForInVariableDeclarationTokenIndex(currentMacroParamDeclarationTokenIndexes, typed)
+			currentMacroParamDeclarationTokenIndexes = addForLoopVariableDeclarationTokenIndex(currentMacroParamDeclarationTokenIndexes, typed)
 		}
 
 		if terminal, ok := node.(antlr.TerminalNode); ok {
@@ -306,18 +306,49 @@ func macroParamDeclarationTokenIndexSet(ctx *parser.Macro_definitionContext) map
 	return result
 }
 
-func addForInVariableDeclarationTokenIndex(base map[int]struct{}, ctx *parser.For_statementContext) map[int]struct{} {
-	if ctx == nil || ctx.IN() == nil || ctx.VARIABLE() == nil || ctx.VARIABLE().GetSymbol() == nil {
+func addForLoopVariableDeclarationTokenIndex(base map[int]struct{}, ctx *parser.For_statementContext) map[int]struct{} {
+	token := forLoopHeaderVariableToken(ctx)
+	if token == nil {
 		return base
 	}
 
-	tokenIndex := ctx.VARIABLE().GetSymbol().GetTokenIndex()
+	tokenIndex := token.GetTokenIndex()
 	result := cloneTokenIndexSet(base)
 	if result == nil {
 		result = make(map[int]struct{})
 	}
 	result[tokenIndex] = struct{}{}
 	return result
+}
+
+func forLoopHeaderVariableToken(ctx *parser.For_statementContext) antlr.Token {
+	if ctx == nil {
+		return nil
+	}
+
+	if ctx.IN() != nil {
+		variable := ctx.VARIABLE()
+		if variable != nil {
+			return variable.GetSymbol()
+		}
+		return nil
+	}
+
+	if ctx.RANGE() == nil {
+		return nil
+	}
+
+	variableContext := ctx.Variable()
+	if variableContext == nil {
+		return nil
+	}
+
+	variable := variableContext.VARIABLE()
+	if variable == nil {
+		return nil
+	}
+
+	return variable.GetSymbol()
 }
 
 func cloneTokenIndexSet(source map[int]struct{}) map[int]struct{} {

@@ -916,6 +916,43 @@ func TestDidReferences_ForInVariableHonorsIncludeDeclaration(t *testing.T) {
 	}
 }
 
+func TestDidReferences_RangeForVariableHonorsIncludeDeclaration(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { for $i: 0..2 { print($i); } }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	declarationOffset := strings.Index(input, "$i:")
+	queryBase := strings.LastIndex(input, "print($i)")
+	if declarationOffset < 0 || queryBase < 0 {
+		t.Fatalf("failed to locate range-for variable markers in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil {
+		t.Fatalf("didReferences include declaration: %v", err)
+	}
+	if len(allRefs) != 2 {
+		t.Fatalf("didReferences(include=true) = %d, want 2", len(allRefs))
+	}
+
+	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	if err != nil {
+		t.Fatalf("didReferences exclude declaration: %v", err)
+	}
+	if len(withoutDecl) != 1 {
+		t.Fatalf("didReferences(include=false) = %d, want 1", len(withoutDecl))
+	}
+
+	declarationPos := PositionForOffset(input, declarationOffset)
+	if withoutDecl[0].Range.Start == declarationPos {
+		t.Fatalf("references(include=false) unexpectedly contains range-for declaration")
+	}
+}
+
 func TestDidReferences_ExcludesAllForInDeclarationsWhenDisabled(t *testing.T) {
 	uri := setupTestState(t)
 
