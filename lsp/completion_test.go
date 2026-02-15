@@ -144,6 +144,8 @@ func TestGetMapAssignmentPrefix(t *testing.T) {
 		{"anonymous indexed map with spaces", "@ [pid] = su", "su", true},
 		{"nested map index", "@dst[@src] = ", "", true},
 		{"nested map index with condition", "if (@a) @b[@c] = ", "", true},
+		{"commented map assignment", "// @x = ", "", false},
+		{"unterminated string map assignment", "printf(\"@x = ", "", false},
 		{"no @", "x = count", "", false},
 		{"greater-equal comparison", "if (@x >= ", "", false},
 		{"less-equal comparison", "if (@x <= ", "", false},
@@ -409,6 +411,20 @@ func TestDetermineCompletionContext(t *testing.T) {
 			char:     17,
 			wantKind: contextStatement,
 		},
+		{
+			name:     "map assignment in comment should be statement",
+			text:     "kprobe:foo { // @x = ",
+			line:     0,
+			char:     21,
+			wantKind: contextStatement,
+		},
+		{
+			name:     "map assignment in unterminated string should be statement",
+			text:     "kprobe:foo { printf(\"@x = ",
+			line:     0,
+			char:     26,
+			wantKind: contextStatement,
+		},
 	}
 
 	for _, tt := range tests {
@@ -475,6 +491,28 @@ func TestMarkerPrefixInCode(t *testing.T) {
 			}
 			if ok && got != tt.want {
 				t.Fatalf("markerPrefixInCode(%q, %q) = %q, want %q", tt.line, tt.marker, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsInStringOrComment(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{name: "normal code", line: "@x = ", want: false},
+		{name: "in comment", line: "// @x = ", want: true},
+		{name: "in unterminated string", line: "printf(\"@x = ", want: true},
+		{name: "closed string then code", line: "printf(\"@\"); @x = ", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isInStringOrComment(tt.line)
+			if got != tt.want {
+				t.Errorf("isInStringOrComment(%q) = %v, want %v", tt.line, got, tt.want)
 			}
 		})
 	}

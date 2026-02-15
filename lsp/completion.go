@@ -245,6 +245,10 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 // and returns the prefix being typed (empty string if just after =).
 // Returns (prefix, true) if in map assignment context, ("", false) otherwise.
 func getMapAssignmentPrefix(line string) (string, bool) {
+	if isInStringOrComment(line) {
+		return "", false
+	}
+
 	// Find the last standalone assignment operator (=), not comparison/compound operators.
 	eqIdx, ok := findLastAssignmentOperator(line)
 	if !ok {
@@ -288,6 +292,43 @@ func hasMapFunctionPrefix(prefix string) bool {
 	}
 
 	return false
+}
+
+func isInStringOrComment(line string) bool {
+	inString := false
+	stringDelimiter := byte(0)
+	escaped := false
+
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == stringDelimiter {
+				inString = false
+				stringDelimiter = 0
+			}
+			continue
+		}
+
+		if c == '/' && i+1 < len(line) && line[i+1] == '/' {
+			return true
+		}
+
+		if c == '"' || c == '\'' {
+			inString = true
+			stringDelimiter = c
+		}
+	}
+
+	return inString
 }
 
 func findLastAssignmentOperator(line string) (int, bool) {
