@@ -19,13 +19,14 @@ const (
 )
 
 type symbolOccurrence struct {
-	kind         symbolKind
-	name         string
-	scopeKey     string
-	sigil        byte
-	rangeValue   protocol.Range
-	token        antlr.Token
-	isDefinition bool
+	kind          symbolKind
+	name          string
+	scopeKey      string
+	sigil         byte
+	rangeValue    protocol.Range
+	token         antlr.Token
+	isDefinition  bool
+	isDeclaration bool
 }
 
 func definitionLocationForPosition(doc *Document, pos protocol.Position) (protocol.Location, bool) {
@@ -89,10 +90,13 @@ func referencesForPosition(doc *Document, pos protocol.Position, includeDeclarat
 		return []protocol.Location{}
 	}
 
-	definition, hasDefinition := selectDefinitionOccurrence(occurrences)
+	declaration, hasDeclaration := selectDeclarationOccurrence(occurrences)
+	if !hasDeclaration {
+		declaration, hasDeclaration = selectDefinitionOccurrence(occurrences)
+	}
 	locations := make([]protocol.Location, 0, len(occurrences))
 	for _, occurrence := range occurrences {
-		if !includeDeclaration && hasDefinition && sameTokenIndex(occurrence.token, definition.token) {
+		if !includeDeclaration && hasDeclaration && sameTokenIndex(occurrence.token, declaration.token) {
 			continue
 		}
 		locations = append(locations, protocol.Location{
@@ -205,8 +209,8 @@ func collectSymbolOccurrences(doc *Document) []symbolOccurrence {
 	}
 
 	occurrences := make([]symbolOccurrence, 0)
-	var walk func(node antlr.Tree, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string)
-	walk = func(node antlr.Tree, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string) {
+	var walk func(node antlr.Tree, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string, macroParamDeclarationTokenIndexes map[int]struct{})
+	walk = func(node antlr.Tree, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string, macroParamDeclarationTokenIndexes map[int]struct{}) {
 		if node == nil {
 			return
 		}
@@ -214,29 +218,32 @@ func collectSymbolOccurrences(doc *Document) []symbolOccurrence {
 		currentScopeKey := variableScopeKey
 		currentMacroMapScopeKey := macroMapScopeKey
 		currentMacroMapParamNames := macroMapParamNames
+		currentMacroParamDeclarationTokenIndexes := macroParamDeclarationTokenIndexes
 		switch typed := node.(type) {
 		case *parser.ProbeContext:
 			currentScopeKey = variableScopeKeyForContext("probe", typed)
 			currentMacroMapScopeKey = ""
 			currentMacroMapParamNames = nil
+			currentMacroParamDeclarationTokenIndexes = nil
 		case *parser.Macro_definitionContext:
 			currentScopeKey = variableScopeKeyForContext("macro", typed)
 			currentMacroMapScopeKey = currentScopeKey
 			currentMacroMapParamNames = macroMapParamSet(typed)
+			currentMacroParamDeclarationTokenIndexes = macroParamDeclarationTokenIndexSet(typed)
 		}
 
 		if terminal, ok := node.(antlr.TerminalNode); ok {
-			if occurrence, ok := symbolOccurrenceFromTerminal(doc.Text, terminal, currentScopeKey, currentMacroMapParamNames, currentMacroMapScopeKey); ok {
+			if occurrence, ok := symbolOccurrenceFromTerminal(doc.Text, terminal, currentScopeKey, currentMacroMapParamNames, currentMacroMapScopeKey, currentMacroParamDeclarationTokenIndexes); ok {
 				occurrences = append(occurrences, occurrence)
 			}
 		}
 
 		for i := 0; i < node.GetChildCount(); i++ {
-			walk(node.GetChild(i), currentScopeKey, currentMacroMapParamNames, currentMacroMapScopeKey)
+			walk(node.GetChild(i), currentScopeKey, currentMacroMapParamNames, currentMacroMapScopeKey, currentMacroParamDeclarationTokenIndexes)
 		}
 	}
 
-	walk(doc.ParseResult.Tree, "", nil, "")
+	walk(doc.ParseResult.Tree, "", nil, "", nil)
 	sortSymbolOccurrences(occurrences)
 	return occurrences
 }
@@ -265,6 +272,32 @@ func macroMapParamSet(ctx *parser.Macro_definitionContext) map[string]struct{} {
 	return result
 }
 
+func macroParamDeclarationTokenIndexSet(ctx *parser.Macro_definitionContext) map[int]struct{} {
+	if ctx == nil || ctx.Macro_params() == nil {
+		return nil
+	}
+
+	result := make(map[int]struct{})
+	for _, param := range ctx.Macro_params().AllMacro_param() {
+		if param == nil {
+			continue
+		}
+
+		if mapParam := param.MAP_NAME(); mapParam != nil && mapParam.GetSymbol() != nil {
+			result[mapParam.GetSymbol().GetTokenIndex()] = struct{}{}
+		}
+		if variableParam := param.VARIABLE(); variableParam != nil && variableParam.GetSymbol() != nil {
+			result[variableParam.GetSymbol().GetTokenIndex()] = struct{}{}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+
+	return result
+}
+
 func variableScopeKeyForContext(prefix string, ctx antlr.ParserRuleContext) string {
 	if ctx == nil {
 		return prefix
@@ -283,7 +316,7 @@ func variableScopeKeyForContext(prefix string, ctx antlr.ParserRuleContext) stri
 	return fmt.Sprintf("%s:%d:%d", prefix, startIndex, stopIndex)
 }
 
-func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string) (symbolOccurrence, bool) {
+func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode, variableScopeKey string, macroMapParamNames map[string]struct{}, macroMapScopeKey string, macroParamDeclarationTokenIndexes map[int]struct{}) (symbolOccurrence, bool) {
 	if terminal == nil {
 		return symbolOccurrence{}, false
 	}
@@ -313,14 +346,17 @@ func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode, vari
 		}
 	}
 
+	_, isDeclaration := macroParamDeclarationTokenIndexes[token.GetTokenIndex()]
+
 	return symbolOccurrence{
-		kind:         kind,
-		name:         name,
-		scopeKey:     scopeKey,
-		sigil:        sigil,
-		rangeValue:   rangeValue,
-		token:        token,
-		isDefinition: tokenRepresentsAssignmentLHS(text, token, sigil),
+		kind:          kind,
+		name:          name,
+		scopeKey:      scopeKey,
+		sigil:         sigil,
+		rangeValue:    rangeValue,
+		token:         token,
+		isDefinition:  tokenRepresentsAssignmentLHS(text, token, sigil),
+		isDeclaration: isDeclaration,
 	}, true
 }
 
@@ -471,6 +507,20 @@ func selectDefinitionOccurrence(occurrences []symbolOccurrence) (symbolOccurrenc
 	}
 
 	return occurrences[0], false
+}
+
+func selectDeclarationOccurrence(occurrences []symbolOccurrence) (symbolOccurrence, bool) {
+	if len(occurrences) == 0 {
+		return symbolOccurrence{}, false
+	}
+
+	for _, occurrence := range occurrences {
+		if occurrence.isDeclaration {
+			return occurrence, true
+		}
+	}
+
+	return symbolOccurrence{}, false
 }
 
 func sortSymbolOccurrences(occurrences []symbolOccurrence) {
