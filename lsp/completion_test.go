@@ -193,6 +193,20 @@ func TestDetermineCompletionContext(t *testing.T) {
 			wantKind: contextProbeStart,
 		},
 		{
+			name:     "probe type with colon",
+			text:     "kprobe:",
+			line:     0,
+			char:     7,
+			wantKind: contextProbeStart,
+		},
+		{
+			name:     "probe target typing",
+			text:     "kprobe:vfs_re",
+			line:     0,
+			char:     13,
+			wantKind: contextProbeStart,
+		},
+		{
 			name:     "map name after @",
 			text:     "kprobe:foo { @",
 			line:     0,
@@ -360,6 +374,27 @@ func TestDetermineCompletionContext(t *testing.T) {
 			char:     24,
 			wantKind: contextStatement,
 		},
+		{
+			name:     "map marker in string should be statement",
+			text:     "kprobe:foo { printf(\"@",
+			line:     0,
+			char:     22,
+			wantKind: contextStatement,
+		},
+		{
+			name:     "map marker in comment should be statement",
+			text:     "kprobe:foo { // @",
+			line:     0,
+			char:     17,
+			wantKind: contextStatement,
+		},
+		{
+			name:     "variable marker in comment should be statement",
+			text:     "kprobe:foo { // $",
+			line:     0,
+			char:     17,
+			wantKind: contextStatement,
+		},
 	}
 
 	for _, tt := range tests {
@@ -396,6 +431,34 @@ func TestExtractLastWord(t *testing.T) {
 			got := extractLastWord(tt.line)
 			if got != tt.want {
 				t.Errorf("extractLastWord(%q) = %q, want %q", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMarkerPrefixInCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		marker   byte
+		want     string
+		wantOkay bool
+	}{
+		{name: "map marker", line: "@co", marker: '@', want: "co", wantOkay: true},
+		{name: "variable marker", line: "$va", marker: '$', want: "va", wantOkay: true},
+		{name: "map marker in string", line: "printf(\"@\")", marker: '@', want: "", wantOkay: false},
+		{name: "map marker in comment", line: "// @foo", marker: '@', want: "", wantOkay: false},
+		{name: "non-identifier suffix", line: "@x+", marker: '@', want: "", wantOkay: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := markerPrefixInCode(tt.line, tt.marker)
+			if ok != tt.wantOkay {
+				t.Fatalf("markerPrefixInCode(%q, %q) ok = %v, want %v", tt.line, tt.marker, ok, tt.wantOkay)
+			}
+			if ok && got != tt.want {
+				t.Fatalf("markerPrefixInCode(%q, %q) = %q, want %q", tt.line, tt.marker, got, tt.want)
 			}
 		})
 	}

@@ -205,21 +205,13 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 	insideBlock := isInsideBlock(textBefore)
 
 	// Check for @ prefix (map) - only if cursor is right after @ or typing map name
-	if lastAt := strings.LastIndex(trimmed, "@"); lastAt >= 0 {
-		afterAt := trimmed[lastAt:]
-		// Only suggest map names if we're typing immediately after @
-		// i.e., no space or operator after @
-		if !strings.ContainsAny(afterAt, " \t=[]();,+-*/<>!&|") {
-			return completionContext{kind: contextMapName, prefix: strings.TrimPrefix(afterAt, "@")}
-		}
+	if prefix, ok := markerPrefixInCode(trimmed, '@'); ok {
+		return completionContext{kind: contextMapName, prefix: prefix}
 	}
 
 	// Check for $ prefix (variable) - only if cursor is right after $ or typing variable name
-	if lastDollar := strings.LastIndex(trimmed, "$"); lastDollar >= 0 {
-		afterDollar := trimmed[lastDollar:]
-		if !strings.ContainsAny(afterDollar, " \t=[]();,+-*/<>!&|") {
-			return completionContext{kind: contextVariable, prefix: strings.TrimPrefix(afterDollar, "$")}
-		}
+	if prefix, ok := markerPrefixInCode(trimmed, '$'); ok {
+		return completionContext{kind: contextVariable, prefix: prefix}
 	}
 
 	// Check if we're right after = in a map assignment (for map function completion)
@@ -406,11 +398,11 @@ func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool 
 		return true
 	}
 
-	if strings.ContainsAny(currentLine, ":/{") {
+	if strings.ContainsAny(currentLine, "/{") {
 		return false
 	}
 
-	tokenEnd := strings.IndexAny(currentLine, " \t")
+	tokenEnd := strings.IndexAny(currentLine, ": \t")
 	if tokenEnd < 0 {
 		tokenEnd = len(currentLine)
 	}
@@ -436,6 +428,67 @@ func hasProbeTypePrefix(token string) bool {
 	}
 
 	return false
+}
+
+func markerPrefixInCode(line string, marker byte) (string, bool) {
+	last := -1
+	inString := false
+	stringDelimiter := byte(0)
+	inLineComment := false
+	escaped := false
+
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+
+		if inLineComment {
+			break
+		}
+
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == stringDelimiter {
+				inString = false
+				stringDelimiter = 0
+			}
+			continue
+		}
+
+		if c == '/' && i+1 < len(line) && line[i+1] == '/' {
+			inLineComment = true
+			i++
+			continue
+		}
+
+		if c == '"' || c == '\'' {
+			inString = true
+			stringDelimiter = c
+			continue
+		}
+
+		if c == marker {
+			last = i
+		}
+	}
+
+	if last < 0 {
+		return "", false
+	}
+
+	prefix := line[last+1:]
+	for _, r := range prefix {
+		if !isWordChar(r) {
+			return "", false
+		}
+	}
+
+	return prefix, true
 }
 
 func isInsideBlock(textBefore string) bool {
