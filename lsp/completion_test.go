@@ -207,6 +207,20 @@ func TestDetermineCompletionContext(t *testing.T) {
 			wantKind: contextProbeStart,
 		},
 		{
+			name:     "uprobe path target typing",
+			text:     "uprobe:/bin/bash:readl",
+			line:     0,
+			char:     22,
+			wantKind: contextProbeStart,
+		},
+		{
+			name:     "usdt path target typing",
+			text:     "usdt:/usr/lib/libc.so.6:pro",
+			line:     0,
+			char:     27,
+			wantKind: contextProbeStart,
+		},
+		{
 			name:     "map name after @",
 			text:     "kprobe:foo { @",
 			line:     0,
@@ -424,6 +438,8 @@ func TestExtractLastWord(t *testing.T) {
 		{name: "brace token", line: "{", want: ""},
 		{name: "equals token", line: "@x =", want: ""},
 		{name: "trailing punctuation", line: "if (@x)", want: "x"},
+		{name: "function arg without space", line: "printf(pi", want: "pi"},
+		{name: "paren expression without space", line: "if (pi", want: "pi"},
 	}
 
 	for _, tt := range tests {

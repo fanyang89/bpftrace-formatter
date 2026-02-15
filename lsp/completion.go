@@ -398,7 +398,11 @@ func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool 
 		return true
 	}
 
-	if strings.ContainsAny(currentLine, "/{") {
+	if strings.Contains(currentLine, "{") {
+		return false
+	}
+
+	if hasPredicateStart(currentLine) {
 		return false
 	}
 
@@ -423,6 +427,19 @@ func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool 
 func hasProbeTypePrefix(token string) bool {
 	for _, p := range probeTypes {
 		if strings.HasPrefix(p.name, token) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasPredicateStart(line string) bool {
+	for i := 1; i < len(line); i++ {
+		if line[i] != '/' {
+			continue
+		}
+		if line[i-1] == ' ' || line[i-1] == '\t' {
 			return true
 		}
 	}
@@ -552,33 +569,26 @@ func braceDepth(text string) int {
 }
 
 func extractLastWord(line string) string {
-	// Find last word character sequence
 	words := strings.Fields(line)
 	if len(words) == 0 {
 		return ""
 	}
 	lastWord := words[len(words)-1]
-	// Remove leading operators/punctuation
-	start := -1
-	for i, r := range lastWord {
-		if isWordChar(r) {
-			start = i
-			break
-		}
-	}
-	if start < 0 {
-		return ""
-	}
 
 	end := len(lastWord)
-	for end > start && !isWordChar(rune(lastWord[end-1])) {
+	for end > 0 && !isWordChar(rune(lastWord[end-1])) {
 		end--
 	}
-	if end <= start {
+	if end == 0 {
 		return ""
 	}
 
-	return lastWord[start:end]
+	start := end - 1
+	for start >= 0 && isWordChar(rune(lastWord[start])) {
+		start--
+	}
+
+	return lastWord[start+1 : end]
 }
 
 func isWordChar(r rune) bool {
