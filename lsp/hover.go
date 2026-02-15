@@ -61,7 +61,7 @@ func hoverForPosition(doc *Document, pos protocol.Position) *protocol.Hover {
 		return nil
 	}
 
-	if identifier, identifierRange, ok := identifierAtPosition(doc.Text, pos); ok {
+	if identifier, identifierRange, sigilPrefixed, ok := identifierAtPosition(doc.Text, pos); ok && !sigilPrefixed {
 		if markdown, ok := semanticHoverMarkdown(identifier); ok {
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{
@@ -186,11 +186,11 @@ func keywordHoverDoc(identifier string) (string, bool) {
 	}
 }
 
-func identifierAtPosition(text string, pos protocol.Position) (string, protocol.Range, bool) {
+func identifierAtPosition(text string, pos protocol.Position) (string, protocol.Range, bool, bool) {
 	offset := offsetForPosition(text, pos)
 	start, end, ok := identifierByteRangeAtOffset(text, offset)
 	if !ok {
-		return "", protocol.Range{}, false
+		return "", protocol.Range{}, false, false
 	}
 
 	startRune := runeOffsetForByteOffset(text, start)
@@ -200,7 +200,12 @@ func identifierAtPosition(text string, pos protocol.Position) (string, protocol.
 		End:   PositionForOffset(text, endRune),
 	}
 
-	return text[start:end], rangeValue, true
+	sigilPrefixed := start > 0 && isSigilPrefix(text[start-1])
+	return text[start:end], rangeValue, sigilPrefixed, true
+}
+
+func isSigilPrefix(value byte) bool {
+	return value == '$' || value == '@'
 }
 
 func identifierByteRangeAtOffset(text string, offset int) (int, int, bool) {
