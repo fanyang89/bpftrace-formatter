@@ -435,6 +435,7 @@ func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool 
 	}
 
 	currentLine := strings.TrimLeft(lines[len(lines)-1], " \t")
+	currentLine = topLevelLineTail(currentLine)
 	if currentLine == "" {
 		return true
 	}
@@ -476,16 +477,96 @@ func hasProbeTypePrefix(token string) bool {
 }
 
 func hasPredicateStart(line string) bool {
-	for i := 1; i < len(line); i++ {
+	inPathTarget := false
+
+	for i := 0; i < len(line); i++ {
+		if line[i] == ':' {
+			inPathTarget = i+1 < len(line) && line[i+1] == '/'
+			continue
+		}
+
 		if line[i] != '/' {
 			continue
 		}
-		if line[i-1] == ' ' || line[i-1] == '\t' {
+
+		if i+1 < len(line) && line[i+1] == '/' {
+			return false
+		}
+
+		if !inPathTarget {
 			return true
 		}
 	}
 
 	return false
+}
+
+func topLevelLineTail(line string) string {
+	depth := 0
+	inString := false
+	stringDelimiter := byte(0)
+	escaped := false
+	lastTopLevelClose := -1
+	commentStart := -1
+
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == stringDelimiter {
+				inString = false
+				stringDelimiter = 0
+			}
+			continue
+		}
+
+		if c == '/' && i+1 < len(line) && line[i+1] == '/' {
+			commentStart = i
+			break
+		}
+
+		if c == '"' || c == '\'' {
+			inString = true
+			stringDelimiter = c
+			continue
+		}
+
+		switch c {
+		case '{':
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+				if depth == 0 {
+					lastTopLevelClose = i
+				}
+			}
+		}
+	}
+
+	start := 0
+	if lastTopLevelClose >= 0 {
+		start = lastTopLevelClose + 1
+	}
+
+	end := len(line)
+	if commentStart >= 0 && commentStart < end {
+		end = commentStart
+	}
+
+	if start >= end {
+		return ""
+	}
+
+	return strings.TrimLeft(line[start:end], " \t")
 }
 
 func markerPrefixInCode(line string, marker byte) (string, bool) {

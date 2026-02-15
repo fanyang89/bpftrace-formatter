@@ -223,6 +223,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 			wantKind: contextProbeStart,
 		},
 		{
+			name:     "inline closed block then probe should be probe context",
+			text:     "BEGIN { printf(\"x\"); } k",
+			line:     0,
+			char:     24,
+			wantKind: contextProbeStart,
+		},
+		{
 			name:     "map name after @",
 			text:     "kprobe:foo { @",
 			line:     0,
@@ -391,6 +398,20 @@ func TestDetermineCompletionContext(t *testing.T) {
 			wantKind: contextStatement,
 		},
 		{
+			name:     "probe predicate without leading space should be statement context",
+			text:     "kprobe:vfs_read/pid==",
+			line:     0,
+			char:     21,
+			wantKind: contextStatement,
+		},
+		{
+			name:     "uprobe predicate without leading space should be statement context",
+			text:     "uprobe:/bin/bash:readl/pid==",
+			line:     0,
+			char:     28,
+			wantKind: contextStatement,
+		},
+		{
 			name:     "map marker in string should be statement",
 			text:     "kprobe:foo { printf(\"@",
 			line:     0,
@@ -513,6 +534,49 @@ func TestIsInStringOrComment(t *testing.T) {
 			got := isInStringOrComment(tt.line)
 			if got != tt.want {
 				t.Errorf("isInStringOrComment(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasPredicateStart(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{name: "kprobe predicate spaced", line: "kprobe:vfs_read /pid==1/", want: true},
+		{name: "kprobe predicate compact", line: "kprobe:vfs_read/pid==1/", want: true},
+		{name: "uprobe path only", line: "uprobe:/bin/bash:readl", want: false},
+		{name: "uprobe predicate compact", line: "uprobe:/bin/bash:readl/pid==1/", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasPredicateStart(tt.line)
+			if got != tt.want {
+				t.Errorf("hasPredicateStart(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTopLevelLineTail(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "simple line", line: "kprobe:", want: "kprobe:"},
+		{name: "after closed inline block", line: "BEGIN { printf(\"x\"); } k", want: "k"},
+		{name: "ignore comment after close", line: "BEGIN { } // comment", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := topLevelLineTail(tt.line)
+			if got != tt.want {
+				t.Errorf("topLevelLineTail(%q) = %q, want %q", tt.line, got, tt.want)
 			}
 		})
 	}
