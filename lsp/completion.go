@@ -490,7 +490,10 @@ func hasPredicateStart(line string) bool {
 		}
 
 		if i+1 < len(line) && line[i+1] == '/' {
-			return false
+			if !inPathTarget && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t') {
+				return false
+			}
+			continue
 		}
 
 		if !inPathTarget {
@@ -548,6 +551,8 @@ func topLevelLineTail(line string) string {
 				if depth == 0 {
 					lastTopLevelClose = i
 				}
+			} else {
+				lastTopLevelClose = i
 			}
 		}
 	}

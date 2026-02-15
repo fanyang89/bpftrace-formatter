@@ -230,6 +230,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 			wantKind: contextProbeStart,
 		},
 		{
+			name:     "line starts with closing brace then probe should be probe context",
+			text:     "BEGIN {\n} k",
+			line:     1,
+			char:     3,
+			wantKind: contextProbeStart,
+		},
+		{
 			name:     "map name after @",
 			text:     "kprobe:foo { @",
 			line:     0,
@@ -549,6 +556,7 @@ func TestHasPredicateStart(t *testing.T) {
 		{name: "kprobe predicate compact", line: "kprobe:vfs_read/pid==1/", want: true},
 		{name: "uprobe path only", line: "uprobe:/bin/bash:readl", want: false},
 		{name: "uprobe predicate compact", line: "uprobe:/bin/bash:readl/pid==1/", want: true},
+		{name: "uprobe path with double slash", line: "uprobe:/tmp//bin/bash:readl/pid==1/", want: true},
 	}
 
 	for _, tt := range tests {
@@ -570,6 +578,7 @@ func TestTopLevelLineTail(t *testing.T) {
 		{name: "simple line", line: "kprobe:", want: "kprobe:"},
 		{name: "after closed inline block", line: "BEGIN { printf(\"x\"); } k", want: "k"},
 		{name: "ignore comment after close", line: "BEGIN { } // comment", want: ""},
+		{name: "closing brace from previous line", line: "} kprobe:", want: "kprobe:"},
 	}
 
 	for _, tt := range tests {
