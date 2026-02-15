@@ -1,6 +1,8 @@
 package lsp
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -16,6 +18,7 @@ var (
 	kindKeyword  = protocol.CompletionItemKindKeyword
 	kindConstant = protocol.CompletionItemKindConstant
 	kindEvent    = protocol.CompletionItemKindEvent
+	kindSnippet  = protocol.InsertTextFormatSnippet
 )
 
 // builtinFunctions defines bpftrace built-in functions with documentation
@@ -753,40 +756,52 @@ func probeTypeCompletions() []protocol.CompletionItem {
 	items := make([]protocol.CompletionItem, 0, len(probeTypes))
 	for _, p := range probeTypes {
 		doc := p.doc + "\n\nExample:\n```bpftrace\n" + p.example + "\n```"
+		sortText := rankedSortText(10, p.name)
+		filterText := p.name
 		items = append(items, protocol.CompletionItem{
 			Label:         p.name,
 			Kind:          &kindEvent,
 			Detail:        &p.detail,
 			Documentation: doc,
+			SortText:      &sortText,
+			FilterText:    &filterText,
 		})
 	}
+	sortCompletionItems(items)
 	return items
 }
 
 func mapCompletions(doc *Document, prefix string) []protocol.CompletionItem {
 	// Collect existing map names from the document
 	maps := collectMapNames(doc)
+	sort.Strings(maps)
 	items := make([]protocol.CompletionItem, 0, len(maps))
 
 	for _, name := range maps {
 		if prefix == "" || strings.HasPrefix(name, prefix) {
 			detail := "map"
 			insertText := name // Insert only the name, not the @ prefix
+			sortText := rankedSortText(20, name)
+			filterText := name
 			items = append(items, protocol.CompletionItem{
 				Label:      "@" + name,
 				Kind:       &kindVariable,
 				Detail:     &detail,
 				InsertText: &insertText,
+				SortText:   &sortText,
+				FilterText: &filterText,
 			})
 		}
 	}
 
+	sortCompletionItems(items)
 	return items
 }
 
 func variableCompletions(doc *Document, prefix string) []protocol.CompletionItem {
 	// Collect existing variable names from the document
 	vars := collectVariableNames(doc)
+	sort.Strings(vars)
 	items := make([]protocol.CompletionItem, 0, len(vars))
 
 	// Add user-defined variables
@@ -794,15 +809,20 @@ func variableCompletions(doc *Document, prefix string) []protocol.CompletionItem
 		if prefix == "" || strings.HasPrefix(name, prefix) {
 			detail := "variable"
 			insertText := name // Insert only the name, not the $ prefix
+			sortText := rankedSortText(20, name)
+			filterText := name
 			items = append(items, protocol.CompletionItem{
 				Label:      "$" + name,
 				Kind:       &kindVariable,
 				Detail:     &detail,
 				InsertText: &insertText,
+				SortText:   &sortText,
+				FilterText: &filterText,
 			})
 		}
 	}
 
+	sortCompletionItems(items)
 	return items
 }
 
@@ -814,15 +834,20 @@ func constantCompletions(prefix string) []protocol.CompletionItem {
 			continue
 		}
 		if prefix == "" || strings.HasPrefix(f.name, prefix) {
+			sortText := rankedSortText(50, f.name)
+			filterText := f.name
 			items = append(items, protocol.CompletionItem{
 				Label:         f.name,
 				Kind:          &kindConstant,
 				Detail:        &f.detail,
 				Documentation: f.doc,
+				SortText:      &sortText,
+				FilterText:    &filterText,
 			})
 		}
 	}
 
+	sortCompletionItems(items)
 	return items
 }
 
@@ -833,17 +858,24 @@ func functionCompletions(prefix string) []protocol.CompletionItem {
 		// Only add functions (have parentheses)
 		if strings.Contains(f.detail, "(") {
 			if prefix == "" || strings.HasPrefix(f.name, prefix) {
+				insertText, insertTextFormat := functionInsertText(f.name, f.detail)
+				sortText := rankedSortText(30, f.name)
+				filterText := f.name
 				items = append(items, protocol.CompletionItem{
-					Label:         f.name,
-					Kind:          &kindFunction,
-					Detail:        &f.detail,
-					Documentation: f.doc,
-					InsertText:    &f.name,
+					Label:            f.name,
+					Kind:             &kindFunction,
+					Detail:           &f.detail,
+					Documentation:    f.doc,
+					InsertText:       &insertText,
+					InsertTextFormat: insertTextFormat,
+					SortText:         &sortText,
+					FilterText:       &filterText,
 				})
 			}
 		}
 	}
 
+	sortCompletionItems(items)
 	return items
 }
 
@@ -852,15 +884,23 @@ func mapFunctionCompletions(prefix string) []protocol.CompletionItem {
 
 	for _, f := range mapFunctions {
 		if prefix == "" || strings.HasPrefix(f.name, prefix) {
+			insertText, insertTextFormat := functionInsertText(f.name, f.detail)
+			sortText := rankedSortText(40, f.name)
+			filterText := f.name
 			items = append(items, protocol.CompletionItem{
-				Label:         f.name,
-				Kind:          &kindFunction,
-				Detail:        &f.detail,
-				Documentation: f.doc,
+				Label:            f.name,
+				Kind:             &kindFunction,
+				Detail:           &f.detail,
+				Documentation:    f.doc,
+				InsertText:       &insertText,
+				InsertTextFormat: insertTextFormat,
+				SortText:         &sortText,
+				FilterText:       &filterText,
 			})
 		}
 	}
 
+	sortCompletionItems(items)
 	return items
 }
 
@@ -870,9 +910,13 @@ func statementCompletions(prefix string) []protocol.CompletionItem {
 	// Add keywords
 	for _, kw := range keywords {
 		if prefix == "" || strings.HasPrefix(kw, prefix) {
+			sortText := rankedSortText(20, kw)
+			filterText := kw
 			items = append(items, protocol.CompletionItem{
-				Label: kw,
-				Kind:  &kindKeyword,
+				Label:      kw,
+				Kind:       &kindKeyword,
+				SortText:   &sortText,
+				FilterText: &filterText,
 			})
 		}
 	}
@@ -886,6 +930,7 @@ func statementCompletions(prefix string) []protocol.CompletionItem {
 	// Add built-in constants (e.g. pid/tid/uid)
 	items = append(items, constantCompletions(prefix)...)
 
+	sortCompletionItems(items)
 	return items
 }
 
@@ -898,11 +943,18 @@ func defaultCompletions() []protocol.CompletionItem {
 	// Functions
 	for _, f := range builtinFunctions {
 		if strings.Contains(f.detail, "(") {
+			insertText, insertTextFormat := functionInsertText(f.name, f.detail)
+			sortText := rankedSortText(30, f.name)
+			filterText := f.name
 			items = append(items, protocol.CompletionItem{
-				Label:         f.name,
-				Kind:          &kindFunction,
-				Detail:        &f.detail,
-				Documentation: f.doc,
+				Label:            f.name,
+				Kind:             &kindFunction,
+				Detail:           &f.detail,
+				Documentation:    f.doc,
+				InsertText:       &insertText,
+				InsertTextFormat: insertTextFormat,
+				SortText:         &sortText,
+				FilterText:       &filterText,
 			})
 		}
 	}
@@ -910,6 +962,7 @@ func defaultCompletions() []protocol.CompletionItem {
 	// Constants
 	items = append(items, constantCompletions("")...)
 
+	sortCompletionItems(items)
 	return items
 }
 
@@ -950,6 +1003,7 @@ func collectMapNames(doc *Document) []string {
 	for name := range names {
 		result = append(result, name)
 	}
+	sort.Strings(result)
 	return result
 }
 
@@ -995,7 +1049,51 @@ func collectVariableNames(doc *Document) []string {
 	for name := range names {
 		result = append(result, name)
 	}
+	sort.Strings(result)
 	return result
+}
+
+func functionInsertText(name string, detail string) (string, *protocol.InsertTextFormat) {
+	openParen := strings.Index(detail, "(")
+	closeParen := strings.LastIndex(detail, ")")
+	if openParen < 0 || closeParen <= openParen {
+		return name, nil
+	}
+
+	params := strings.TrimSpace(detail[openParen+1 : closeParen])
+	if params == "" {
+		snippet := name + "()"
+		return snippet, &kindSnippet
+	}
+
+	snippet := fmt.Sprintf("%s(${1:%s})", name, escapeSnippetText(params))
+	return snippet, &kindSnippet
+}
+
+func escapeSnippetText(value string) string {
+	replacer := strings.NewReplacer(`\\`, `\\\\`, `$`, `\\$`, `}`, `\\}`)
+	return replacer.Replace(value)
+}
+
+func rankedSortText(rank int, label string) string {
+	return fmt.Sprintf("%02d:%s", rank, strings.ToLower(label))
+}
+
+func sortCompletionItems(items []protocol.CompletionItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i].Label
+		right := items[j].Label
+		if items[i].SortText != nil {
+			left = *items[i].SortText
+		}
+		if items[j].SortText != nil {
+			right = *items[j].SortText
+		}
+		if left == right {
+			return items[i].Label < items[j].Label
+		}
+		return left < right
+	})
 }
 
 func isValidIdentifier(s string) bool {
