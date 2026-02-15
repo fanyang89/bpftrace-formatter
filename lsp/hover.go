@@ -248,12 +248,21 @@ func isSemanticIdentifierContext(text string, identifierStart int) bool {
 
 func previousNonSpaceByteIndex(text string, idx int) int {
 	for idx >= 0 {
-		if text[idx] != ' ' && text[idx] != '\t' {
+		if !isASCIIWhitespace(text[idx]) {
 			return idx
 		}
 		idx--
 	}
 	return -1
+}
+
+func isASCIIWhitespace(value byte) bool {
+	switch value {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	default:
+		return false
+	}
 }
 
 func isSigilPrefix(value byte) bool {
