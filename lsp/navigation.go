@@ -39,7 +39,10 @@ func definitionLocationForPosition(doc *Document, pos protocol.Position) (protoc
 	if len(occurrences) == 0 {
 		return protocol.Location{}, false
 	}
-	definition, _ := selectDefinitionOccurrence(occurrences)
+	definition, ok := selectDeclarationOccurrence(occurrences)
+	if !ok {
+		definition, _ = selectDefinitionOccurrence(occurrences)
+	}
 
 	return protocol.Location{
 		URI:   protocol.DocumentUri(doc.URI),
