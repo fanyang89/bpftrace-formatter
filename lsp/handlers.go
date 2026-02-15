@@ -15,6 +15,7 @@ var (
 	configResolver    = NewConfigResolver()
 	documentStore     = NewDocumentStore(configResolver)
 	configSupported   atomic.Bool
+	snippetSupported  atomic.Bool
 	initSettingsMu    sync.Mutex
 	initSettings      map[string]any
 )
@@ -41,6 +42,7 @@ func initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error)
 		if roots := workspaceRootsFromParams(params); len(roots) > 0 {
 			configResolver.SetWorkspaceRoots(roots)
 		}
+		snippetSupported.Store(clientSupportsCompletionSnippet(params))
 		supported := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 		configSupported.Store(supported)
 
@@ -64,6 +66,17 @@ func initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error)
 			Version: &version,
 		},
 	}, nil
+}
+
+func clientSupportsCompletionSnippet(params *protocol.InitializeParams) bool {
+	if params == nil || params.Capabilities.TextDocument == nil {
+		return false
+	}
+	completion := params.Capabilities.TextDocument.Completion
+	if completion == nil || completion.CompletionItem == nil || completion.CompletionItem.SnippetSupport == nil {
+		return false
+	}
+	return *completion.CompletionItem.SnippetSupport
 }
 
 func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {

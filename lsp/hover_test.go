@@ -138,3 +138,81 @@ func TestHoverForPosition_SigilPrefixedMapFallsBackToSyntaxHover(t *testing.T) {
 		t.Fatalf("expected non-semantic hover for sigil-prefixed map, got %q", content.Value)
 	}
 }
+
+func TestHoverForPosition_StringLiteralFallsBackToSyntaxHover(t *testing.T) {
+	input := "BEGIN { printf(\"pid\"); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "pid")
+	if offset < 0 {
+		t.Fatalf("missing pid in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+1))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindPlainText {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindPlainText)
+	}
+	if strings.Contains(content.Value, "Builtin Constant") {
+		t.Fatalf("expected non-semantic hover inside string literal, got %q", content.Value)
+	}
+}
+
+func TestHoverForPosition_FieldAccessFallsBackToSyntaxHover(t *testing.T) {
+	input := "kprobe:sys_clone { printf(\"%d\", args.pid); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "pid")
+	if offset < 0 {
+		t.Fatalf("missing pid in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+1))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindPlainText {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindPlainText)
+	}
+	if strings.Contains(content.Value, "Builtin Constant") {
+		t.Fatalf("expected non-semantic hover on field access, got %q", content.Value)
+	}
+}
+
+func TestHoverForPosition_CommentFallsBackToSyntaxHover(t *testing.T) {
+	input := "BEGIN { // pid\n  @x = 1; }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "pid")
+	if offset < 0 {
+		t.Fatalf("missing pid in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+1))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindPlainText {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindPlainText)
+	}
+	if strings.Contains(content.Value, "Builtin Constant") {
+		t.Fatalf("expected non-semantic hover in comment, got %q", content.Value)
+	}
+}

@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ func setupTestState(t *testing.T) string {
 
 	shutdownRequested.Store(false)
 	configSupported.Store(false)
+	snippetSupported.Store(false)
 
 	initSettingsMu.Lock()
 	initSettings = nil
@@ -70,6 +72,24 @@ func TestInitialize_ReturnsServerCapabilities(t *testing.T) {
 	}
 	if result.ServerInfo == nil || result.ServerInfo.Name == "" {
 		t.Fatalf("initialize: expected server info")
+	}
+}
+
+func TestClientSupportsCompletionSnippet(t *testing.T) {
+	params := &protocol.InitializeParams{}
+	if err := json.Unmarshal([]byte(`{"capabilities":{"textDocument":{"completion":{"completionItem":{"snippetSupport":true}}}}}`), params); err != nil {
+		t.Fatalf("Unmarshal snippet=true: %v", err)
+	}
+	if !clientSupportsCompletionSnippet(params) {
+		t.Fatalf("expected snippet support to be true")
+	}
+
+	params = &protocol.InitializeParams{}
+	if err := json.Unmarshal([]byte(`{"capabilities":{"textDocument":{"completion":{"completionItem":{"snippetSupport":false}}}}}`), params); err != nil {
+		t.Fatalf("Unmarshal snippet=false: %v", err)
+	}
+	if clientSupportsCompletionSnippet(params) {
+		t.Fatalf("expected snippet support to be false")
 	}
 }
 
