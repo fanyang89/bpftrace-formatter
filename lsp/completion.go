@@ -335,7 +335,10 @@ func isMapLValue(candidate string) bool {
 	for i < len(candidate) && isWordChar(rune(candidate[i])) {
 		i++
 	}
-	if i == 1 {
+	hasName := i > 1
+	i = skipInlineSpaces(candidate, i)
+
+	if !hasName {
 		if i == len(candidate) {
 			return true
 		}
@@ -345,6 +348,10 @@ func isMapLValue(candidate string) bool {
 	}
 
 	for i < len(candidate) {
+		i = skipInlineSpaces(candidate, i)
+		if i == len(candidate) {
+			return true
+		}
 		if candidate[i] != '[' {
 			return false
 		}
@@ -366,6 +373,13 @@ func isMapLValue(candidate string) bool {
 	}
 
 	return true
+}
+
+func skipInlineSpaces(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	return i
 }
 
 func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool {
