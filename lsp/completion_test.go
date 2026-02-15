@@ -299,6 +299,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 			char:     27,
 			wantKind: contextStatement,
 		},
+		{
+			name:     "top-level after string brace should be probe context",
+			text:     "BEGIN { printf(\"{\"); }\nk",
+			line:     1,
+			char:     1,
+			wantKind: contextProbeStart,
+		},
 	}
 
 	for _, tt := range tests {
@@ -327,6 +334,7 @@ func TestExtractLastWord(t *testing.T) {
 		{name: "operator token", line: "@x +", want: ""},
 		{name: "brace token", line: "{", want: ""},
 		{name: "equals token", line: "@x =", want: ""},
+		{name: "trailing punctuation", line: "if (@x)", want: "x"},
 	}
 
 	for _, tt := range tests {
@@ -334,6 +342,39 @@ func TestExtractLastWord(t *testing.T) {
 			got := extractLastWord(tt.line)
 			if got != tt.want {
 				t.Errorf("extractLastWord(%q) = %q, want %q", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsInsideBlockIgnoresBracesInStringsAndComments(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			name: "string brace ignored",
+			text: "kprobe:foo { printf(\"{\"); }\n",
+			want: false,
+		},
+		{
+			name: "comment brace ignored",
+			text: "kprobe:foo { // }\n",
+			want: true,
+		},
+		{
+			name: "escaped quote in string",
+			text: "kprobe:foo { printf(\"\\\"{\\\"\"); }\n",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isInsideBlock(tt.text)
+			if got != tt.want {
+				t.Errorf("isInsideBlock(%q) = %v, want %v", tt.text, got, tt.want)
 			}
 		})
 	}

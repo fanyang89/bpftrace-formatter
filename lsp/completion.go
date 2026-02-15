@@ -354,11 +354,7 @@ func isMapLValue(candidate string) bool {
 }
 
 func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool {
-	// Count braces to determine if we're outside any block
-	openBraces := strings.Count(textBefore, "{")
-	closeBraces := strings.Count(textBefore, "}")
-
-	if openBraces <= closeBraces {
+	if braceDepth(textBefore) <= 0 {
 		return true
 	}
 
@@ -372,9 +368,60 @@ func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool 
 }
 
 func isInsideBlock(textBefore string) bool {
-	openBraces := strings.Count(textBefore, "{")
-	closeBraces := strings.Count(textBefore, "}")
-	return openBraces > closeBraces
+	return braceDepth(textBefore) > 0
+}
+
+func braceDepth(text string) int {
+	depth := 0
+	inString := false
+	inLineComment := false
+	escaped := false
+
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+
+		if inLineComment {
+			if c == '\n' {
+				inLineComment = false
+			}
+			continue
+		}
+
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		if c == '/' && i+1 < len(text) && text[i+1] == '/' {
+			inLineComment = true
+			i++
+			continue
+		}
+
+		if c == '"' {
+			inString = true
+			continue
+		}
+
+		switch c {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+	}
+
+	return depth
 }
 
 func extractLastWord(line string) string {
@@ -385,12 +432,26 @@ func extractLastWord(line string) string {
 	}
 	lastWord := words[len(words)-1]
 	// Remove leading operators/punctuation
+	start := -1
 	for i, r := range lastWord {
 		if isWordChar(r) {
-			return lastWord[i:]
+			start = i
+			break
 		}
 	}
-	return ""
+	if start < 0 {
+		return ""
+	}
+
+	end := len(lastWord)
+	for end > start && !isWordChar(rune(lastWord[end-1])) {
+		end--
+	}
+	if end <= start {
+		return ""
+	}
+
+	return lastWord[start:end]
 }
 
 func isWordChar(r rune) bool {
