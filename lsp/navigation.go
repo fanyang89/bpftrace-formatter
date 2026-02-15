@@ -233,6 +233,8 @@ func collectSymbolOccurrences(doc *Document) []symbolOccurrence {
 			currentMacroMapScopeKey = currentScopeKey
 			currentMacroMapParamNames = macroMapParamSet(typed)
 			currentMacroParamDeclarationTokenIndexes = macroParamDeclarationTokenIndexSet(typed)
+		case *parser.For_statementContext:
+			currentMacroParamDeclarationTokenIndexes = addForInVariableDeclarationTokenIndex(currentMacroParamDeclarationTokenIndexes, typed)
 		}
 
 		if terminal, ok := node.(antlr.TerminalNode); ok {
@@ -299,6 +301,31 @@ func macroParamDeclarationTokenIndexSet(ctx *parser.Macro_definitionContext) map
 	}
 
 	return result
+}
+
+func addForInVariableDeclarationTokenIndex(base map[int]struct{}, ctx *parser.For_statementContext) map[int]struct{} {
+	if ctx == nil || ctx.IN() == nil || ctx.VARIABLE() == nil || ctx.VARIABLE().GetSymbol() == nil {
+		return base
+	}
+
+	tokenIndex := ctx.VARIABLE().GetSymbol().GetTokenIndex()
+	result := cloneTokenIndexSet(base)
+	if result == nil {
+		result = make(map[int]struct{})
+	}
+	result[tokenIndex] = struct{}{}
+	return result
+}
+
+func cloneTokenIndexSet(source map[int]struct{}) map[int]struct{} {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[int]struct{}, len(source))
+	for tokenIndex := range source {
+		cloned[tokenIndex] = struct{}{}
+	}
+	return cloned
 }
 
 func variableScopeKeyForContext(prefix string, ctx antlr.ParserRuleContext) string {
