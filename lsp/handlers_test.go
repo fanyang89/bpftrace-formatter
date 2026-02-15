@@ -67,8 +67,29 @@ func TestInitialize_ReturnsServerCapabilities(t *testing.T) {
 	if value, ok := result.Capabilities.HoverProvider.(bool); !ok || !value {
 		t.Fatalf("initialize: expected hover provider")
 	}
+	if value, ok := result.Capabilities.DocumentHighlightProvider.(bool); !ok || !value {
+		t.Fatalf("initialize: expected document highlight provider")
+	}
 	if value, ok := result.Capabilities.DocumentSymbolProvider.(bool); !ok || !value {
 		t.Fatalf("initialize: expected document symbol provider")
+	}
+	if value, ok := result.Capabilities.DefinitionProvider.(bool); !ok || !value {
+		t.Fatalf("initialize: expected definition provider")
+	}
+	if value, ok := result.Capabilities.ReferencesProvider.(bool); !ok || !value {
+		t.Fatalf("initialize: expected references provider")
+	}
+	switch value := result.Capabilities.RenameProvider.(type) {
+	case bool:
+		if !value {
+			t.Fatalf("initialize: expected rename provider")
+		}
+	case *protocol.RenameOptions:
+		if value == nil || value.PrepareProvider == nil || !*value.PrepareProvider {
+			t.Fatalf("initialize: expected rename prepare provider")
+		}
+	default:
+		t.Fatalf("initialize: unexpected rename provider type %T", result.Capabilities.RenameProvider)
 	}
 	if result.ServerInfo == nil || result.ServerInfo.Name == "" {
 		t.Fatalf("initialize: expected server info")
@@ -331,6 +352,94 @@ func TestDidHover_ReturnsContents(t *testing.T) {
 	}
 }
 
+func TestDidDocumentHighlight_ReturnsReadAndWriteHighlights(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.Index(input, "print($lat)")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query variable")
+	}
+
+	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryBase+len("print(")+1)}})
+	if err != nil {
+		t.Fatalf("didDocumentHighlight: %v", err)
+	}
+	if len(highlights) != 3 {
+		t.Fatalf("highlights = %d, want 3", len(highlights))
+	}
+
+	var readCount int
+	var writeCount int
+	for _, highlight := range highlights {
+		if highlight.Kind == nil {
+			t.Fatalf("highlight kind must not be nil")
+		}
+		switch *highlight.Kind {
+		case protocol.DocumentHighlightKindRead:
+			readCount++
+		case protocol.DocumentHighlightKindWrite:
+			writeCount++
+		}
+	}
+	if readCount == 0 || writeCount == 0 {
+		t.Fatalf("expected both read and write highlights, got read=%d write=%d", readCount, writeCount)
+	}
+}
+
+func TestDidPrepareRename_ReturnsRangeForVariable(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $lat = 1; print($lat); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	offset := strings.Index(input, "$lat")
+	if offset < 0 {
+		t.Fatalf("missing variable in input")
+	}
+
+	prepared, err := didPrepareRename(nil, &protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, offset+1)}})
+	if err != nil {
+		t.Fatalf("didPrepareRename: %v", err)
+	}
+
+	rangeValue, ok := prepared.(protocol.Range)
+	if !ok {
+		t.Fatalf("didPrepareRename type = %T, want protocol.Range", prepared)
+	}
+	if rangeValue.Start != PositionForOffset(input, offset) {
+		t.Fatalf("prepare rename start = %+v, want %+v", rangeValue.Start, PositionForOffset(input, offset))
+	}
+}
+
+func TestDidPrepareRename_ReturnsNilForUnsupportedToken(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $lat = 1; }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	offset := strings.Index(input, "BEGIN")
+	if offset < 0 {
+		t.Fatalf("missing BEGIN in input")
+	}
+
+	prepared, err := didPrepareRename(nil, &protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, offset+1)}})
+	if err != nil {
+		t.Fatalf("didPrepareRename: %v", err)
+	}
+	if prepared != nil {
+		t.Fatalf("expected nil prepare rename result for unsupported token, got %T", prepared)
+	}
+}
+
 func TestDidDocumentSymbol_ReturnsSymbols(t *testing.T) {
 	uri := setupTestState(t)
 
@@ -352,6 +461,206 @@ func TestDidDocumentSymbol_ReturnsSymbols(t *testing.T) {
 	}
 	if symbols[0].Name == "" {
 		t.Fatalf("expected non-empty symbol name")
+	}
+}
+
+func TestDidDefinition_ReturnsVariableDefinition(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	defOffset := strings.Index(input, "$lat")
+	queryBase := strings.Index(input, "print($lat)")
+	if defOffset < 0 || queryBase < 0 {
+		t.Fatalf("failed to locate variable markers in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDefinition: %v", err)
+	}
+
+	locations, ok := resultAny.([]protocol.Location)
+	if !ok {
+		t.Fatalf("didDefinition result type = %T, want []protocol.Location", resultAny)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("didDefinition locations = %d, want 1", len(locations))
+	}
+	if locations[0].URI != protocol.DocumentUri(uri) {
+		t.Fatalf("didDefinition uri = %q, want %q", locations[0].URI, uri)
+	}
+	if locations[0].Range.Start != PositionForOffset(input, defOffset) {
+		t.Fatalf("didDefinition start = %+v, want %+v", locations[0].Range.Start, PositionForOffset(input, defOffset))
+	}
+}
+
+func TestDidDefinition_ReturnsMapDefinition(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { @req = count(); print(@req); @req = sum(1); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	defOffset := strings.Index(input, "@req")
+	queryBase := strings.Index(input, "print(@req)")
+	if defOffset < 0 || queryBase < 0 {
+		t.Fatalf("failed to locate map markers in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDefinition: %v", err)
+	}
+
+	locations, ok := resultAny.([]protocol.Location)
+	if !ok {
+		t.Fatalf("didDefinition result type = %T, want []protocol.Location", resultAny)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("didDefinition locations = %d, want 1", len(locations))
+	}
+	if locations[0].Range.Start != PositionForOffset(input, defOffset) {
+		t.Fatalf("didDefinition start = %+v, want %+v", locations[0].Range.Start, PositionForOffset(input, defOffset))
+	}
+}
+
+func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.Index(input, "print($lat)")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query variable in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil {
+		t.Fatalf("didReferences include declaration: %v", err)
+	}
+	if len(allRefs) != 3 {
+		t.Fatalf("didReferences(include=true) = %d, want 3", len(allRefs))
+	}
+
+	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	if err != nil {
+		t.Fatalf("didReferences exclude declaration: %v", err)
+	}
+	if len(withoutDecl) != 2 {
+		t.Fatalf("didReferences(include=false) = %d, want 2", len(withoutDecl))
+	}
+
+	definitionOffset := strings.Index(input, "$lat")
+	if definitionOffset < 0 {
+		t.Fatalf("failed to locate definition")
+	}
+	wantDefinitionPos := PositionForOffset(input, definitionOffset)
+	for _, ref := range withoutDecl {
+		if ref.Range.Start == wantDefinitionPos {
+			t.Fatalf("references without declaration unexpectedly include definition")
+		}
+	}
+}
+
+func TestDidRename_RenamesVariableAndAcceptsSigilInNewName(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.Index(input, "print($lat)")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query variable in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$latency"})
+	if err != nil {
+		t.Fatalf("didRename: %v", err)
+	}
+	if edit == nil {
+		t.Fatalf("expected workspace edit")
+	}
+
+	changes, ok := edit.Changes[protocol.DocumentUri(uri)]
+	if !ok {
+		t.Fatalf("expected changes for uri %q", uri)
+	}
+	if len(changes) != 3 {
+		t.Fatalf("rename edits = %d, want 3", len(changes))
+	}
+	for _, change := range changes {
+		if change.NewText != "$latency" {
+			t.Fatalf("rename new text = %q, want %q", change.NewText, "$latency")
+		}
+	}
+}
+
+func TestDidRename_RenamesMapAndAcceptsSigilInNewName(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { @req = count(); print(@req); @req = sum(1); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.Index(input, "print(@req)")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query map in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "@lat"})
+	if err != nil {
+		t.Fatalf("didRename: %v", err)
+	}
+	if edit == nil {
+		t.Fatalf("expected workspace edit")
+	}
+
+	changes := edit.Changes[protocol.DocumentUri(uri)]
+	if len(changes) != 3 {
+		t.Fatalf("rename edits = %d, want 3", len(changes))
+	}
+	for _, change := range changes {
+		if change.NewText != "@lat" {
+			t.Fatalf("rename new text = %q, want %q", change.NewText, "@lat")
+		}
+	}
+}
+
+func TestDidRename_RejectsInvalidNewName(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $lat = 1; print($lat); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryOffset := strings.Index(input, "$lat")
+	if queryOffset < 0 {
+		t.Fatalf("failed to locate variable in input")
+	}
+
+	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$1bad"})
+	if err == nil {
+		t.Fatalf("expected rename error for invalid identifier")
+	}
+	if edit != nil {
+		t.Fatalf("expected nil edit on rename error")
 	}
 }
 
