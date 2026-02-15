@@ -1,6 +1,8 @@
 package lsp
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -50,6 +52,37 @@ func TestFunctionCompletions(t *testing.T) {
 		if !found[e] {
 			t.Errorf("expected function %q not found", e)
 		}
+	}
+}
+
+func TestFunctionCompletions_UseSnippetInsertText(t *testing.T) {
+	items := functionCompletions("printf")
+	if len(items) == 0 {
+		t.Fatalf("expected printf completion")
+	}
+
+	var found bool
+	for _, item := range items {
+		if item.Label != "printf" {
+			continue
+		}
+		found = true
+		if item.InsertText == nil || !strings.HasPrefix(*item.InsertText, "printf(") {
+			t.Fatalf("expected printf snippet insert text, got %+v", item.InsertText)
+		}
+		if item.InsertTextFormat == nil || *item.InsertTextFormat != protocol.InsertTextFormatSnippet {
+			t.Fatalf("expected snippet insert format")
+		}
+		if item.SortText == nil || *item.SortText == "" {
+			t.Fatalf("expected sortText for printf item")
+		}
+		if item.FilterText == nil || *item.FilterText != "printf" {
+			t.Fatalf("expected filterText=printf")
+		}
+	}
+
+	if !found {
+		t.Fatalf("missing printf completion item")
 	}
 }
 
@@ -658,6 +691,21 @@ func TestCollectMapNames(t *testing.T) {
 	}
 }
 
+func TestCollectMapNames_Sorted(t *testing.T) {
+	text := `kprobe:foo {
+		@z = count();
+		@a = count();
+		@m = count();
+	}`
+	parseResult := ParseDocument(text)
+	doc := &Document{Text: text, ParseResult: parseResult}
+
+	maps := collectMapNames(doc)
+	if !reflect.DeepEqual(maps, []string{"a", "m", "z"}) {
+		t.Fatalf("collectMapNames sorted = %v, want [a m z]", maps)
+	}
+}
+
 func TestCollectVariableNames(t *testing.T) {
 	text := `kprobe:foo {
 		$x = 1;
@@ -684,6 +732,38 @@ func TestCollectVariableNames(t *testing.T) {
 	// At minimum we should find some variables
 	if len(found) == 0 {
 		t.Error("expected to find at least one variable name")
+	}
+}
+
+func TestCollectVariableNames_Sorted(t *testing.T) {
+	text := `kprobe:foo {
+		$z = 1;
+		$a = 2;
+		$m = 3;
+	}`
+	parseResult := ParseDocument(text)
+	doc := &Document{Text: text, ParseResult: parseResult}
+
+	vars := collectVariableNames(doc)
+	if !reflect.DeepEqual(vars, []string{"a", "m", "z"}) {
+		t.Fatalf("collectVariableNames sorted = %v, want [a m z]", vars)
+	}
+}
+
+func TestMapCompletions_SortedOrder(t *testing.T) {
+	text := `kprobe:foo {
+		@z = count();
+		@a = count();
+	}`
+	parseResult := ParseDocument(text)
+	doc := &Document{Text: text, ParseResult: parseResult}
+
+	items := mapCompletions(doc, "")
+	if len(items) < 2 {
+		t.Fatalf("expected at least 2 map completions, got %d", len(items))
+	}
+	if items[0].Label != "@a" || items[1].Label != "@z" {
+		t.Fatalf("map completion order = [%s %s], want [@a @z]", items[0].Label, items[1].Label)
 	}
 }
 

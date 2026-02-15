@@ -1,6 +1,11 @@
 package lsp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	protocol "github.com/tliron/glsp/protocol_3_16"
+)
 
 func TestSnippetForContext_UnicodeOffsets(t *testing.T) {
 	input := "// 注释\nkprobe:sys_clone { @x = count(); }\n"
@@ -21,5 +26,63 @@ func TestSnippetForContext_UnicodeOffsets(t *testing.T) {
 	got := snippetForContext(input, probeList)
 	if got != "kprobe:sys_clone" {
 		t.Fatalf("snippetForContext = %q, want %q", got, "kprobe:sys_clone")
+	}
+}
+
+func TestHoverForPosition_BuiltinFunctionMarkdown(t *testing.T) {
+	input := "BEGIN { printf(\"x\"); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "printf")
+	if offset < 0 {
+		t.Fatalf("missing printf in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+2))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	if !strings.Contains(content.Value, "Builtin Function") {
+		t.Fatalf("expected builtin function heading, got %q", content.Value)
+	}
+	if !strings.Contains(content.Value, "printf(fmt, ...)") {
+		t.Fatalf("expected function signature, got %q", content.Value)
+	}
+}
+
+func TestHoverForPosition_ProbeTypeMarkdown(t *testing.T) {
+	input := "kprobe:sys_clone { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "kprobe")
+	if offset < 0 {
+		t.Fatalf("missing kprobe in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+1))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	if !strings.Contains(content.Value, "Probe Type") {
+		t.Fatalf("expected probe heading, got %q", content.Value)
+	}
+	if !strings.Contains(content.Value, "kprobe:function") {
+		t.Fatalf("expected probe signature, got %q", content.Value)
 	}
 }
