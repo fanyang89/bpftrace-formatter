@@ -916,6 +916,129 @@ func TestDidReferences_ForInVariableHonorsIncludeDeclaration(t *testing.T) {
 	}
 }
 
+func TestDidReferences_ExcludesAllForInDeclarationsWhenDisabled(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { @a[1] = 1; @b[1] = 1; for ($i in @a) { print($i); } for ($i in @b) { print($i); } }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	firstDeclarationOffset := strings.Index(input, "$i in @a")
+	secondDeclarationOffset := strings.Index(input, "$i in @b")
+	queryBase := strings.LastIndex(input, "print($i)")
+	if firstDeclarationOffset < 0 || secondDeclarationOffset < 0 || queryBase < 0 {
+		t.Fatalf("failed to locate for-in variable markers in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil {
+		t.Fatalf("didReferences include declaration: %v", err)
+	}
+	if len(allRefs) != 4 {
+		t.Fatalf("didReferences(include=true) = %d, want 4", len(allRefs))
+	}
+
+	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	if err != nil {
+		t.Fatalf("didReferences exclude declaration: %v", err)
+	}
+	if len(withoutDecl) != 2 {
+		t.Fatalf("didReferences(include=false) = %d, want 2", len(withoutDecl))
+	}
+
+	firstDeclarationPos := PositionForOffset(input, firstDeclarationOffset)
+	secondDeclarationPos := PositionForOffset(input, secondDeclarationOffset)
+	for _, ref := range withoutDecl {
+		if ref.Range.Start == firstDeclarationPos || ref.Range.Start == secondDeclarationPos {
+			t.Fatalf("references(include=false) unexpectedly contains for-in declaration")
+		}
+	}
+}
+
+func TestDidDocumentHighlight_IncrementMutationIsWrite(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $x++; print($x); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.LastIndex(input, "print($x)")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query variable in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDocumentHighlight: %v", err)
+	}
+	if len(highlights) != 2 {
+		t.Fatalf("highlights = %d, want 2", len(highlights))
+	}
+
+	var readCount int
+	var writeCount int
+	for _, highlight := range highlights {
+		if highlight.Kind == nil {
+			t.Fatalf("highlight kind must not be nil")
+		}
+		switch *highlight.Kind {
+		case protocol.DocumentHighlightKindRead:
+			readCount++
+		case protocol.DocumentHighlightKindWrite:
+			writeCount++
+		}
+	}
+
+	if readCount != 1 || writeCount != 1 {
+		t.Fatalf("expected one read and one write highlight, got read=%d write=%d", readCount, writeCount)
+	}
+}
+
+func TestDidDocumentHighlight_MapIncrementMutationIsWrite(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { @m[1]++; print(@m[1]); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.LastIndex(input, "print(@m")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query map in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDocumentHighlight: %v", err)
+	}
+	if len(highlights) != 2 {
+		t.Fatalf("highlights = %d, want 2", len(highlights))
+	}
+
+	var readCount int
+	var writeCount int
+	for _, highlight := range highlights {
+		if highlight.Kind == nil {
+			t.Fatalf("highlight kind must not be nil")
+		}
+		switch *highlight.Kind {
+		case protocol.DocumentHighlightKindRead:
+			readCount++
+		case protocol.DocumentHighlightKindWrite:
+			writeCount++
+		}
+	}
+
+	if readCount != 1 || writeCount != 1 {
+		t.Fatalf("expected one read and one write highlight, got read=%d write=%d", readCount, writeCount)
+	}
+}
+
 func TestDidRename_RenamesVariableAndAcceptsSigilInNewName(t *testing.T) {
 	uri := setupTestState(t)
 
