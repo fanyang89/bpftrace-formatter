@@ -531,6 +531,77 @@ func TestDidDefinition_ReturnsMapDefinition(t *testing.T) {
 	}
 }
 
+func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { $x = 1; print($x); }\nEND { $x = 2; print($x); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	firstDefOffset := strings.Index(input, "$x = 1")
+	secondDefMarker := "END { $x = 2"
+	secondDefOffset := strings.Index(input, secondDefMarker)
+	queryBase := strings.LastIndex(input, "print($x)")
+	if firstDefOffset < 0 || secondDefOffset < 0 || queryBase < 0 {
+		t.Fatalf("failed to locate variable markers in input")
+	}
+	secondDefOffset += len("END { ")
+	queryOffset := queryBase + len("print(")
+
+	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDefinition: %v", err)
+	}
+
+	locations, ok := resultAny.([]protocol.Location)
+	if !ok {
+		t.Fatalf("didDefinition result type = %T, want []protocol.Location", resultAny)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("didDefinition locations = %d, want 1", len(locations))
+	}
+	if locations[0].Range.Start != PositionForOffset(input, secondDefOffset) {
+		t.Fatalf("didDefinition start = %+v, want %+v", locations[0].Range.Start, PositionForOffset(input, secondDefOffset))
+	}
+
+	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil {
+		t.Fatalf("didReferences: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("didReferences = %d, want 2", len(refs))
+	}
+
+	firstDefPos := PositionForOffset(input, firstDefOffset)
+	for _, ref := range refs {
+		if ref.Range.Start == firstDefPos {
+			t.Fatalf("references unexpectedly include variable from another probe")
+		}
+	}
+
+	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$y"})
+	if err != nil {
+		t.Fatalf("didRename: %v", err)
+	}
+	if edit == nil {
+		t.Fatalf("expected workspace edit")
+	}
+
+	changes := edit.Changes[protocol.DocumentUri(uri)]
+	if len(changes) != 2 {
+		t.Fatalf("rename edits = %d, want 2", len(changes))
+	}
+	for _, change := range changes {
+		if change.NewText != "$y" {
+			t.Fatalf("rename new text = %q, want %q", change.NewText, "$y")
+		}
+		if change.Range.Start == firstDefPos {
+			t.Fatalf("rename unexpectedly edits variable from another probe")
+		}
+	}
+}
+
 func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
 	uri := setupTestState(t)
 
@@ -570,6 +641,69 @@ func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
 		if ref.Range.Start == wantDefinitionPos {
 			t.Fatalf("references without declaration unexpectedly include definition")
 		}
+	}
+}
+
+func TestDidReferences_NoDefinitionKeepsAllReferences(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { print($lat); print($lat); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryBase := strings.LastIndex(input, "print($lat)")
+	if queryBase < 0 {
+		t.Fatalf("failed to locate query variable in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	if err != nil {
+		t.Fatalf("didReferences: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("didReferences(include=false) = %d, want 2", len(refs))
+	}
+}
+
+func TestDidDocumentHighlight_AssignmentDetectionHandlesUnicodePrefix(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "BEGIN { printf(\"你好\"); $lat = 1; print($lat); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	queryByteOffset := strings.LastIndex(input, "$lat")
+	if queryByteOffset < 0 {
+		t.Fatalf("failed to locate query variable in input")
+	}
+	queryOffset := len([]rune(input[:queryByteOffset])) + 1
+
+	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset)}})
+	if err != nil {
+		t.Fatalf("didDocumentHighlight: %v", err)
+	}
+	if len(highlights) != 2 {
+		t.Fatalf("highlights = %d, want 2", len(highlights))
+	}
+
+	var readCount int
+	var writeCount int
+	for _, highlight := range highlights {
+		if highlight.Kind == nil {
+			t.Fatalf("highlight kind must not be nil")
+		}
+		switch *highlight.Kind {
+		case protocol.DocumentHighlightKindRead:
+			readCount++
+		case protocol.DocumentHighlightKindWrite:
+			writeCount++
+		}
+	}
+	if readCount != 1 || writeCount != 1 {
+		t.Fatalf("expected one read and one write highlight, got read=%d write=%d", readCount, writeCount)
 	}
 }
 

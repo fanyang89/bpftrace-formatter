@@ -7,6 +7,8 @@ import (
 
 	"github.com/antlr4-go/antlr/v4"
 	protocol "github.com/tliron/glsp/protocol_3_16"
+
+	"github.com/fanyang89/bpftrace-formatter/parser"
 )
 
 type symbolKind int
@@ -19,6 +21,7 @@ const (
 type symbolOccurrence struct {
 	kind         symbolKind
 	name         string
+	scopeKey     string
 	sigil        byte
 	rangeValue   protocol.Range
 	token        antlr.Token
@@ -31,11 +34,11 @@ func definitionLocationForPosition(doc *Document, pos protocol.Position) (protoc
 		return protocol.Location{}, false
 	}
 
-	occurrences := symbolOccurrencesByIdentity(doc, target.kind, target.name)
-	definition, ok := selectDefinitionOccurrence(occurrences)
-	if !ok {
+	occurrences := symbolOccurrencesByIdentity(doc, *target)
+	if len(occurrences) == 0 {
 		return protocol.Location{}, false
 	}
+	definition, _ := selectDefinitionOccurrence(occurrences)
 
 	return protocol.Location{
 		URI:   protocol.DocumentUri(doc.URI),
@@ -49,7 +52,7 @@ func documentHighlightsForPosition(doc *Document, pos protocol.Position) []proto
 		return []protocol.DocumentHighlight{}
 	}
 
-	occurrences := symbolOccurrencesByIdentity(doc, target.kind, target.name)
+	occurrences := symbolOccurrencesByIdentity(doc, *target)
 	highlights := make([]protocol.DocumentHighlight, 0, len(occurrences))
 	for _, occurrence := range occurrences {
 		kind := protocol.DocumentHighlightKindRead
@@ -81,7 +84,7 @@ func referencesForPosition(doc *Document, pos protocol.Position, includeDeclarat
 		return []protocol.Location{}
 	}
 
-	occurrences := symbolOccurrencesByIdentity(doc, target.kind, target.name)
+	occurrences := symbolOccurrencesByIdentity(doc, *target)
 	if len(occurrences) == 0 {
 		return []protocol.Location{}
 	}
@@ -112,7 +115,7 @@ func renameWorkspaceEditForPosition(doc *Document, pos protocol.Position, newNam
 		return nil, err
 	}
 
-	occurrences := symbolOccurrencesByIdentity(doc, target.kind, target.name)
+	occurrences := symbolOccurrencesByIdentity(doc, *target)
 	if len(occurrences) == 0 {
 		return nil, nil
 	}
@@ -181,13 +184,17 @@ func symbolAtPosition(doc *Document, pos protocol.Position) (*symbolOccurrence, 
 	return &selected, true
 }
 
-func symbolOccurrencesByIdentity(doc *Document, kind symbolKind, name string) []symbolOccurrence {
+func symbolOccurrencesByIdentity(doc *Document, target symbolOccurrence) []symbolOccurrence {
 	occurrences := collectSymbolOccurrences(doc)
 	filtered := make([]symbolOccurrence, 0, len(occurrences))
 	for _, occurrence := range occurrences {
-		if occurrence.kind == kind && occurrence.name == name {
-			filtered = append(filtered, occurrence)
+		if occurrence.kind != target.kind || occurrence.name != target.name {
+			continue
 		}
+		if target.kind == symbolKindVariable && occurrence.scopeKey != target.scopeKey {
+			continue
+		}
+		filtered = append(filtered, occurrence)
 	}
 	return filtered
 }
@@ -198,29 +205,55 @@ func collectSymbolOccurrences(doc *Document) []symbolOccurrence {
 	}
 
 	occurrences := make([]symbolOccurrence, 0)
-	var walk func(node antlr.Tree)
-	walk = func(node antlr.Tree) {
+	var walk func(node antlr.Tree, variableScopeKey string)
+	walk = func(node antlr.Tree, variableScopeKey string) {
 		if node == nil {
 			return
 		}
 
+		currentScopeKey := variableScopeKey
+		switch typed := node.(type) {
+		case *parser.ProbeContext:
+			currentScopeKey = variableScopeKeyForContext("probe", typed)
+		case *parser.Macro_definitionContext:
+			currentScopeKey = variableScopeKeyForContext("macro", typed)
+		}
+
 		if terminal, ok := node.(antlr.TerminalNode); ok {
-			if occurrence, ok := symbolOccurrenceFromTerminal(doc.Text, terminal); ok {
+			if occurrence, ok := symbolOccurrenceFromTerminal(doc.Text, terminal, currentScopeKey); ok {
 				occurrences = append(occurrences, occurrence)
 			}
 		}
 
 		for i := 0; i < node.GetChildCount(); i++ {
-			walk(node.GetChild(i))
+			walk(node.GetChild(i), currentScopeKey)
 		}
 	}
 
-	walk(doc.ParseResult.Tree)
+	walk(doc.ParseResult.Tree, "")
 	sortSymbolOccurrences(occurrences)
 	return occurrences
 }
 
-func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode) (symbolOccurrence, bool) {
+func variableScopeKeyForContext(prefix string, ctx antlr.ParserRuleContext) string {
+	if ctx == nil {
+		return prefix
+	}
+
+	startIndex := -1
+	if startToken := ctx.GetStart(); startToken != nil {
+		startIndex = startToken.GetTokenIndex()
+	}
+
+	stopIndex := -1
+	if stopToken := ctx.GetStop(); stopToken != nil {
+		stopIndex = stopToken.GetTokenIndex()
+	}
+
+	return fmt.Sprintf("%s:%d:%d", prefix, startIndex, stopIndex)
+}
+
+func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode, variableScopeKey string) (symbolOccurrence, bool) {
 	if terminal == nil {
 		return symbolOccurrence{}, false
 	}
@@ -240,9 +273,15 @@ func symbolOccurrenceFromTerminal(text string, terminal antlr.TerminalNode) (sym
 		return symbolOccurrence{}, false
 	}
 
+	scopeKey := ""
+	if kind == symbolKindVariable {
+		scopeKey = variableScopeKey
+	}
+
 	return symbolOccurrence{
 		kind:         kind,
 		name:         name,
+		scopeKey:     scopeKey,
 		sigil:        sigil,
 		rangeValue:   rangeValue,
 		token:        token,
@@ -275,35 +314,36 @@ func tokenRepresentsAssignmentLHS(text string, token antlr.Token, sigil byte) bo
 	if token == nil {
 		return false
 	}
+	runes := []rune(text)
 
 	start := token.GetStart()
 	stop := token.GetStop()
-	if start < 0 || stop < start || stop+1 > len(text) {
+	if start < 0 || stop < start || stop+1 > len(runes) {
 		return false
 	}
 
 	index := stop + 1
-	index = skipASCIIWhitespaceForward(text, index)
+	index = skipASCIIWhitespaceForward(runes, index)
 
-	if sigil == '@' && index < len(text) && text[index] == '[' {
-		next, ok := consumeBracketExpression(text, index)
+	if sigil == '@' && index < len(runes) && runes[index] == '[' {
+		next, ok := consumeBracketExpression(runes, index)
 		if !ok {
 			return false
 		}
-		index = skipASCIIWhitespaceForward(text, next)
+		index = skipASCIIWhitespaceForward(runes, next)
 	}
 
-	return hasAssignmentOperator(text, index)
+	return hasAssignmentOperator(runes, index)
 }
 
-func skipASCIIWhitespaceForward(text string, index int) int {
-	for index < len(text) && isASCIIWhitespace(text[index]) {
+func skipASCIIWhitespaceForward(text []rune, index int) int {
+	for index < len(text) && isASCIIWhitespaceRune(text[index]) {
 		index++
 	}
 	return index
 }
 
-func consumeBracketExpression(text string, start int) (int, bool) {
+func consumeBracketExpression(text []rune, start int) (int, bool) {
 	if start >= len(text) || text[start] != '[' {
 		return start, false
 	}
@@ -324,14 +364,14 @@ func consumeBracketExpression(text string, start int) (int, bool) {
 	return start, false
 }
 
-func hasAssignmentOperator(text string, index int) bool {
+func hasAssignmentOperator(text []rune, index int) bool {
 	if index < 0 || index >= len(text) {
 		return false
 	}
 
 	operators := []string{"<<=", ">>=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "="}
 	for _, operator := range operators {
-		if !strings.HasPrefix(text[index:], operator) {
+		if !hasRunePrefix(text, index, operator) {
 			continue
 		}
 		if operator == "=" && index+1 < len(text) && text[index+1] == '=' {
@@ -341,6 +381,28 @@ func hasAssignmentOperator(text string, index int) bool {
 	}
 
 	return false
+}
+
+func isASCIIWhitespaceRune(value rune) bool {
+	switch value {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	default:
+		return false
+	}
+}
+
+func hasRunePrefix(text []rune, index int, prefix string) bool {
+	prefixRunes := []rune(prefix)
+	if index < 0 || index+len(prefixRunes) > len(text) {
+		return false
+	}
+	for i, char := range prefixRunes {
+		if text[index+i] != char {
+			return false
+		}
+	}
+	return true
 }
 
 func selectDefinitionOccurrence(occurrences []symbolOccurrence) (symbolOccurrence, bool) {
@@ -354,7 +416,7 @@ func selectDefinitionOccurrence(occurrences []symbolOccurrence) (symbolOccurrenc
 		}
 	}
 
-	return occurrences[0], true
+	return occurrences[0], false
 }
 
 func sortSymbolOccurrences(occurrences []symbolOccurrence) {
