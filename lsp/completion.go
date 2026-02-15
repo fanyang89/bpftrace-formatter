@@ -241,6 +241,11 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 		return completionContext{kind: contextStatement, prefix: lastWord}
 	}
 
+	if trimmed != "" {
+		lastWord := extractLastWord(trimmed)
+		return completionContext{kind: contextStatement, prefix: lastWord}
+	}
+
 	return completionContext{kind: contextUnknown}
 }
 
@@ -318,12 +323,16 @@ func findLastAssignmentOperator(line string) (int, bool) {
 
 func hasMapLValueBeforeAssignment(beforeEq string) bool {
 	trimmed := strings.TrimRight(beforeEq, " \t")
-	lastAt := strings.LastIndex(trimmed, "@")
-	if lastAt < 0 {
-		return false
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != '@' {
+			continue
+		}
+		if isMapLValue(trimmed[i:]) {
+			return true
+		}
 	}
 
-	return isMapLValue(trimmed[lastAt:])
+	return false
 }
 
 func isMapLValue(candidate string) bool {
@@ -383,14 +392,47 @@ func skipInlineSpaces(s string, i int) int {
 }
 
 func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool {
-	if braceDepth(textBefore) <= 0 {
+	if braceDepth(textBefore) > 0 {
+		return false
+	}
+
+	lines := strings.Split(textBefore, "\n")
+	if len(lines) == 0 {
+		return true
+	}
+
+	currentLine := strings.TrimLeft(lines[len(lines)-1], " \t")
+	if currentLine == "" {
+		return true
+	}
+
+	if strings.ContainsAny(currentLine, ":/{") {
+		return false
+	}
+
+	tokenEnd := strings.IndexAny(currentLine, " \t")
+	if tokenEnd < 0 {
+		tokenEnd = len(currentLine)
+	}
+	token := currentLine[:tokenEnd]
+	if hasProbeTypePrefix(token) {
 		return true
 	}
 
 	// Also check using AST if available
 	if doc.ParseResult != nil && doc.ParseResult.Tree != nil {
-		// At root level, suggest probe types
+		// Outside top-level declaration sites, do not force probe-type completion.
 		return false
+	}
+
+	return false
+}
+
+func hasProbeTypePrefix(token string) bool {
+	for _, p := range probeTypes {
+		if strings.HasPrefix(p.name, token) {
+			return true
+		}
 	}
 
 	return false

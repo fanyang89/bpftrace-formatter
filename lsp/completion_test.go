@@ -142,6 +142,8 @@ func TestGetMapAssignmentPrefix(t *testing.T) {
 		{"anonymous indexed map typing", "@[pid] = su", "su", true},
 		{"named indexed map with spaces", "@x [pid] = ", "", true},
 		{"anonymous indexed map with spaces", "@ [pid] = su", "su", true},
+		{"nested map index", "@dst[@src] = ", "", true},
+		{"nested map index with condition", "if (@a) @b[@c] = ", "", true},
 		{"no @", "x = count", "", false},
 		{"greater-equal comparison", "if (@x >= ", "", false},
 		{"less-equal comparison", "if (@x <= ", "", false},
@@ -261,6 +263,20 @@ func TestDetermineCompletionContext(t *testing.T) {
 			wantKind: contextMapFunction,
 		},
 		{
+			name:     "map function after nested map index",
+			text:     "kprobe:foo { @dst[@src] = ",
+			line:     0,
+			char:     26,
+			wantKind: contextMapFunction,
+		},
+		{
+			name:     "map function after conditional nested map assignment",
+			text:     "kprobe:foo { if (@a) @b[@c] = ",
+			line:     0,
+			char:     30,
+			wantKind: contextMapFunction,
+		},
+		{
 			name:     "non-map identifier after map assignment should be statement",
 			text:     "kprobe:foo { @x = pid",
 			line:     0,
@@ -336,6 +352,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 			line:     1,
 			char:     1,
 			wantKind: contextProbeStart,
+		},
+		{
+			name:     "probe predicate should be statement context",
+			text:     "kprobe:vfs_read /pid == ",
+			line:     0,
+			char:     24,
+			wantKind: contextStatement,
 		},
 	}
 
