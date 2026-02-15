@@ -86,3 +86,55 @@ func TestHoverForPosition_ProbeTypeMarkdown(t *testing.T) {
 		t.Fatalf("expected probe signature, got %q", content.Value)
 	}
 }
+
+func TestHoverForPosition_SigilPrefixedVariableFallsBackToSyntaxHover(t *testing.T) {
+	input := "BEGIN { $pid = 1; print($pid); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "$pid")
+	if offset < 0 {
+		t.Fatalf("missing $pid in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+1))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindPlainText {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindPlainText)
+	}
+	if strings.Contains(content.Value, "Builtin Constant") {
+		t.Fatalf("expected non-semantic hover for sigil-prefixed variable, got %q", content.Value)
+	}
+}
+
+func TestHoverForPosition_SigilPrefixedMapFallsBackToSyntaxHover(t *testing.T) {
+	input := "BEGIN { @count = 1; print(@count); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "@count")
+	if offset < 0 {
+		t.Fatalf("missing @count in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+1))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindPlainText {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindPlainText)
+	}
+	if strings.Contains(content.Value, "Map Function") {
+		t.Fatalf("expected non-semantic hover for sigil-prefixed map, got %q", content.Value)
+	}
+}
