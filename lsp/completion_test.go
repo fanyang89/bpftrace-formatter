@@ -147,6 +147,7 @@ func TestGetMapAssignmentPrefix(t *testing.T) {
 		{"not-equal comparison", "if (@x != ", "", false},
 		{"map read in condition then scalar assignment", "if (@x) $y = ", "", false},
 		{"map read in condition then map assignment", "if (@x) @y = ", "", true},
+		{"rhs non-map identifier", "@x = pid", "", false},
 		{"has operator", "@x = 1 + ", "", false},
 		{"has paren", "@x = foo(", "", false},
 		{"complete call", "@x = count()", "", false},
@@ -244,6 +245,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 			wantKind: contextMapFunction,
 		},
 		{
+			name:     "non-map identifier after map assignment should be statement",
+			text:     "kprobe:foo { @x = pid",
+			line:     0,
+			char:     21,
+			wantKind: contextStatement,
+		},
+		{
 			name:     "expression after map assignment - should be statement",
 			text:     "kprobe:foo { @x = 1 + ",
 			line:     0,
@@ -302,6 +310,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 		{
 			name:     "top-level after string brace should be probe context",
 			text:     "BEGIN { printf(\"{\"); }\nk",
+			line:     1,
+			char:     1,
+			wantKind: contextProbeStart,
+		},
+		{
+			name:     "top-level after single-quoted brace should be probe context",
+			text:     "BEGIN { printf('{'); }\nk",
 			line:     1,
 			char:     1,
 			wantKind: contextProbeStart,
@@ -366,6 +381,11 @@ func TestIsInsideBlockIgnoresBracesInStringsAndComments(t *testing.T) {
 		{
 			name: "escaped quote in string",
 			text: "kprobe:foo { printf(\"\\\"{\\\"\"); }\n",
+			want: false,
+		},
+		{
+			name: "single-quoted brace ignored",
+			text: "kprobe:foo { printf('{'); }\n",
 			want: false,
 		},
 	}

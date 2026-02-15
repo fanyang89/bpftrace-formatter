@@ -275,7 +275,22 @@ func getMapAssignmentPrefix(line string) (string, bool) {
 			return "", false
 		}
 	}
+
+	if !hasMapFunctionPrefix(afterEq) {
+		return "", false
+	}
+
 	return afterEq, true
+}
+
+func hasMapFunctionPrefix(prefix string) bool {
+	for _, f := range mapFunctions {
+		if strings.HasPrefix(f.name, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func findLastAssignmentOperator(line string) (int, bool) {
@@ -374,6 +389,7 @@ func isInsideBlock(textBefore string) bool {
 func braceDepth(text string) int {
 	depth := 0
 	inString := false
+	stringDelimiter := byte(0)
 	inLineComment := false
 	escaped := false
 
@@ -396,8 +412,9 @@ func braceDepth(text string) int {
 				escaped = true
 				continue
 			}
-			if c == '"' {
+			if c == stringDelimiter {
 				inString = false
+				stringDelimiter = 0
 			}
 			continue
 		}
@@ -408,8 +425,9 @@ func braceDepth(text string) int {
 			continue
 		}
 
-		if c == '"' {
+		if c == '"' || c == '\'' {
 			inString = true
+			stringDelimiter = c
 			continue
 		}
 
