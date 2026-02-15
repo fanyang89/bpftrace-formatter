@@ -56,6 +56,10 @@ func TestFunctionCompletions(t *testing.T) {
 }
 
 func TestFunctionCompletions_UseSnippetInsertText(t *testing.T) {
+	previous := snippetSupported.Load()
+	snippetSupported.Store(true)
+	t.Cleanup(func() { snippetSupported.Store(previous) })
+
 	items := functionCompletions("printf")
 	if len(items) == 0 {
 		t.Fatalf("expected printf completion")
@@ -78,6 +82,35 @@ func TestFunctionCompletions_UseSnippetInsertText(t *testing.T) {
 		}
 		if item.FilterText == nil || *item.FilterText != "printf" {
 			t.Fatalf("expected filterText=printf")
+		}
+	}
+
+	if !found {
+		t.Fatalf("missing printf completion item")
+	}
+}
+
+func TestFunctionCompletions_FallsBackToPlainTextWithoutSnippetSupport(t *testing.T) {
+	previous := snippetSupported.Load()
+	snippetSupported.Store(false)
+	t.Cleanup(func() { snippetSupported.Store(previous) })
+
+	items := functionCompletions("printf")
+	if len(items) == 0 {
+		t.Fatalf("expected printf completion")
+	}
+
+	var found bool
+	for _, item := range items {
+		if item.Label != "printf" {
+			continue
+		}
+		found = true
+		if item.InsertText == nil || *item.InsertText != "printf()" {
+			t.Fatalf("expected plain insert text printf(), got %+v", item.InsertText)
+		}
+		if item.InsertTextFormat != nil {
+			t.Fatalf("expected nil insert text format without snippet support")
 		}
 	}
 

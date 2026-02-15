@@ -61,14 +61,14 @@ func hoverForPosition(doc *Document, pos protocol.Position) *protocol.Hover {
 		return nil
 	}
 
-	if identifier, identifierRange, sigilPrefixed, ok := identifierAtPosition(doc.Text, pos); ok && !sigilPrefixed {
-		if markdown, ok := semanticHoverMarkdown(identifier); ok {
+	if info, ok := identifierAtPosition(doc.Text, pos); ok && !info.sigilPrefixed && info.semanticContext {
+		if markdown, ok := semanticHoverMarkdown(info.value); ok {
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.MarkupKindMarkdown,
 					Value: markdown,
 				},
-				Range: &identifierRange,
+				Range: &info.rangeValue,
 			}
 		}
 	}
@@ -186,11 +186,18 @@ func keywordHoverDoc(identifier string) (string, bool) {
 	}
 }
 
-func identifierAtPosition(text string, pos protocol.Position) (string, protocol.Range, bool, bool) {
+type identifierInfo struct {
+	value           string
+	rangeValue      protocol.Range
+	sigilPrefixed   bool
+	semanticContext bool
+}
+
+func identifierAtPosition(text string, pos protocol.Position) (*identifierInfo, bool) {
 	offset := offsetForPosition(text, pos)
 	start, end, ok := identifierByteRangeAtOffset(text, offset)
 	if !ok {
-		return "", protocol.Range{}, false, false
+		return nil, false
 	}
 
 	startRune := runeOffsetForByteOffset(text, start)
@@ -201,7 +208,52 @@ func identifierAtPosition(text string, pos protocol.Position) (string, protocol.
 	}
 
 	sigilPrefixed := start > 0 && isSigilPrefix(text[start-1])
-	return text[start:end], rangeValue, sigilPrefixed, true
+	info := &identifierInfo{
+		value:           text[start:end],
+		rangeValue:      rangeValue,
+		sigilPrefixed:   sigilPrefixed,
+		semanticContext: isSemanticIdentifierContext(text, start),
+	}
+	return info, true
+}
+
+func isSemanticIdentifierContext(text string, identifierStart int) bool {
+	if identifierStart < 0 || identifierStart > len(text) {
+		return false
+	}
+
+	lineStart := strings.LastIndex(text[:identifierStart], "\n") + 1
+	linePrefix := text[lineStart:identifierStart]
+	if isInStringOrComment(linePrefix) {
+		return false
+	}
+
+	previous := previousNonSpaceByteIndex(text, identifierStart-1)
+	if previous < 0 {
+		return true
+	}
+
+	if text[previous] == '.' {
+		return false
+	}
+	if text[previous] == '>' {
+		arrowLeft := previousNonSpaceByteIndex(text, previous-1)
+		if arrowLeft >= 0 && text[arrowLeft] == '-' {
+			return false
+		}
+	}
+
+	return true
+}
+
+func previousNonSpaceByteIndex(text string, idx int) int {
+	for idx >= 0 {
+		if text[idx] != ' ' && text[idx] != '\t' {
+			return idx
+		}
+		idx--
+	}
+	return -1
 }
 
 func isSigilPrefix(value byte) bool {

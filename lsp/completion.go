@@ -1059,6 +1059,9 @@ func functionInsertText(name string, detail string) (string, *protocol.InsertTex
 	if openParen < 0 || closeParen <= openParen {
 		return name, nil
 	}
+	if !snippetSupported.Load() {
+		return name + "()", nil
+	}
 
 	params := strings.TrimSpace(detail[openParen+1 : closeParen])
 	if params == "" {
