@@ -121,6 +121,8 @@ func TestGetMapAssignmentPrefix(t *testing.T) {
 		{"less-equal comparison", "if (@x <= ", "", false},
 		{"double-equal comparison", "if (@x == ", "", false},
 		{"not-equal comparison", "if (@x != ", "", false},
+		{"map read in condition then scalar assignment", "if (@x) $y = ", "", false},
+		{"map read in condition then map assignment", "if (@x) @y = ", "", true},
 		{"has operator", "@x = 1 + ", "", false},
 		{"has paren", "@x = foo(", "", false},
 		{"complete call", "@x = count()", "", false},
@@ -259,6 +261,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 			char:     23,
 			wantKind: contextStatement,
 		},
+		{
+			name:     "map read then scalar assignment should be statement",
+			text:     "kprobe:foo { if (@x) $y = ",
+			line:     0,
+			char:     27,
+			wantKind: contextStatement,
+		},
 	}
 
 	for _, tt := range tests {
@@ -272,6 +281,28 @@ func TestDetermineCompletionContext(t *testing.T) {
 			ctx := determineCompletionContext(doc, pos)
 			if ctx.kind != tt.wantKind {
 				t.Errorf("determineCompletionContext() = %v, want %v", ctx.kind, tt.wantKind)
+			}
+		})
+	}
+}
+
+func TestExtractLastWord(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "identifier", line: "foo bar", want: "bar"},
+		{name: "operator token", line: "@x +", want: ""},
+		{name: "brace token", line: "{", want: ""},
+		{name: "equals token", line: "@x =", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractLastWord(tt.line)
+			if got != tt.want {
+				t.Errorf("extractLastWord(%q) = %q, want %q", tt.line, got, tt.want)
 			}
 		})
 	}

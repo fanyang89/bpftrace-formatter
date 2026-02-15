@@ -257,9 +257,9 @@ func getMapAssignmentPrefix(line string) (string, bool) {
 		return "", false
 	}
 
-	// Check there's a @ before the =
+	// Check the assignment LHS is a map lvalue (@name or @name[...]).
 	beforeEq := line[:eqIdx]
-	if !strings.Contains(beforeEq, "@") {
+	if !hasMapLValueBeforeAssignment(beforeEq) {
 		return "", false
 	}
 
@@ -304,6 +304,53 @@ func findLastAssignmentOperator(line string) (int, bool) {
 	return 0, false
 }
 
+func hasMapLValueBeforeAssignment(beforeEq string) bool {
+	trimmed := strings.TrimRight(beforeEq, " \t")
+	lastAt := strings.LastIndex(trimmed, "@")
+	if lastAt < 0 {
+		return false
+	}
+
+	return isMapLValue(trimmed[lastAt:])
+}
+
+func isMapLValue(candidate string) bool {
+	if candidate == "" || candidate[0] != '@' {
+		return false
+	}
+
+	i := 1
+	for i < len(candidate) && isWordChar(rune(candidate[i])) {
+		i++
+	}
+	if i == 1 {
+		return false
+	}
+
+	for i < len(candidate) {
+		if candidate[i] != '[' {
+			return false
+		}
+
+		depth := 1
+		i++
+		for i < len(candidate) && depth > 0 {
+			switch candidate[i] {
+			case '[':
+				depth++
+			case ']':
+				depth--
+			}
+			i++
+		}
+		if depth != 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
 func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool {
 	// Count braces to determine if we're outside any block
 	openBraces := strings.Count(textBefore, "{")
@@ -341,7 +388,7 @@ func extractLastWord(line string) string {
 			return lastWord[i:]
 		}
 	}
-	return lastWord
+	return ""
 }
 
 func isWordChar(r rune) bool {
