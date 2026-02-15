@@ -129,10 +129,6 @@ var probeTypes = []struct {
 	{"software", "software:event:count", "Software events", "software:page-faults:100 { }"},
 	{"hardware", "hardware:event:count", "Hardware events", "hardware:cache-misses:1000000 { }"},
 	{"watchpoint", "watchpoint:addr:len:mode", "Memory watchpoint", "watchpoint:0x1234:4:rw { }"},
-	{"kfunc", "kfunc:function", "Kernel BTF function entry", "kfunc:vfs_read { }"},
-	{"kretfunc", "kretfunc:function", "Kernel BTF function return", "kretfunc:vfs_read { }"},
-	{"iter", "iter:type", "BPF iterator", "iter:task { }"},
-	{"rawtracepoint", "rawtracepoint:name", "Raw tracepoint", "rawtracepoint:sched_switch { }"},
 }
 
 // keywords defines bpftrace keywords
@@ -324,7 +320,12 @@ func isMapLValue(candidate string) bool {
 		i++
 	}
 	if i == 1 {
-		return false
+		if i == len(candidate) {
+			return true
+		}
+		if candidate[i] != '[' {
+			return false
+		}
 	}
 
 	for i < len(candidate) {

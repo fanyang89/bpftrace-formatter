@@ -116,6 +116,8 @@ func TestGetMapAssignmentPrefix(t *testing.T) {
 		{"right after =", "@x = ", "", true},
 		{"typing function", "@x = cou", "cou", true},
 		{"with spaces", "@x =   sum", "sum", true},
+		{"anonymous map right after =", "@ = ", "", true},
+		{"anonymous indexed map typing", "@[pid] = su", "su", true},
 		{"no @", "x = count", "", false},
 		{"greater-equal comparison", "if (@x >= ", "", false},
 		{"less-equal comparison", "if (@x <= ", "", false},
@@ -203,6 +205,13 @@ func TestDetermineCompletionContext(t *testing.T) {
 			text:     "kprobe:foo { @x = ",
 			line:     0,
 			char:     18,
+			wantKind: contextMapFunction,
+		},
+		{
+			name:     "map function after anonymous map =",
+			text:     "kprobe:foo { @ = ",
+			line:     0,
+			char:     17,
 			wantKind: contextMapFunction,
 		},
 		{
