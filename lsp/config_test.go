@@ -188,3 +188,36 @@ func TestConfigResolver_UsesWorkspaceRootWhenDocPathEmpty(t *testing.T) {
 		t.Fatalf("indent size = %d, want %d", cfg.Indent.Size, 2)
 	}
 }
+
+func TestConfigResolver_ReflectsUpdatedConfigFile(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, ".btfmt.json")
+	if err := os.WriteFile(configPath, []byte(`{"indent":{"size":2}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile initial: %v", err)
+	}
+
+	docPath := filepath.Join(root, "probe.bt")
+	resolver := NewConfigResolver()
+	resolver.SetWorkspaceRoots([]string{root})
+
+	uri := fileURIForPath(docPath)
+	cfg, err := resolver.ResolveForDocument(string(uri), docPath)
+	if err != nil {
+		t.Fatalf("ResolveForDocument initial: %v", err)
+	}
+	if cfg == nil || cfg.Indent.Size != 2 {
+		t.Fatalf("initial indent size = %d, want %d", cfg.Indent.Size, 2)
+	}
+
+	if err := os.WriteFile(configPath, []byte(`{"indent":{"size":6}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile updated: %v", err)
+	}
+
+	cfg, err = resolver.ResolveForDocument(string(uri), docPath)
+	if err != nil {
+		t.Fatalf("ResolveForDocument updated: %v", err)
+	}
+	if cfg == nil || cfg.Indent.Size != 6 {
+		t.Fatalf("updated indent size = %d, want %d", cfg.Indent.Size, 6)
+	}
+}

@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -124,21 +125,21 @@ func didChange(context *glsp.Context, params *protocol.DidChangeTextDocumentPara
 	if params == nil || len(params.ContentChanges) == 0 {
 		return nil
 	}
+
+	uri := string(params.TextDocument.URI)
 	text := ""
-	change := params.ContentChanges[0]
-	switch value := change.(type) {
-	case protocol.TextDocumentContentChangeEvent:
-		text = value.Text
-	case *protocol.TextDocumentContentChangeEvent:
-		text = value.Text
-	case protocol.TextDocumentContentChangeEventWhole:
-		text = value.Text
-	case *protocol.TextDocumentContentChangeEventWhole:
-		text = value.Text
-	default:
-		return nil
+	hasBase := false
+	if existingDoc, ok := documentStore.Get(uri); ok && existingDoc != nil {
+		text = existingDoc.Text
+		hasBase = true
 	}
-	doc, err := documentStore.Change(params.TextDocument.URI, params.TextDocument.Version, text)
+
+	updatedText, err := applyContentChangesToText(text, hasBase, params.ContentChanges)
+	if err != nil {
+		return err
+	}
+
+	doc, err := documentStore.Change(params.TextDocument.URI, params.TextDocument.Version, updatedText)
 	if err != nil {
 		return err
 	}
@@ -146,6 +147,72 @@ func didChange(context *glsp.Context, params *protocol.DidChangeTextDocumentPara
 	version := protocol.UInteger(params.TextDocument.Version)
 	publishDiagnostics(context, params.TextDocument.URI, &version, doc.Diagnostics)
 	return nil
+}
+
+func applyContentChangesToText(text string, hasBase bool, changes []any) (string, error) {
+	currentText := text
+	baseAvailable := hasBase
+
+	for _, change := range changes {
+		switch value := change.(type) {
+		case protocol.TextDocumentContentChangeEvent:
+			var err error
+			currentText, baseAvailable, err = applyTextDocumentContentChange(currentText, baseAvailable, value.Range, value.Text)
+			if err != nil {
+				return "", err
+			}
+		case *protocol.TextDocumentContentChangeEvent:
+			if value == nil {
+				continue
+			}
+			var err error
+			currentText, baseAvailable, err = applyTextDocumentContentChange(currentText, baseAvailable, value.Range, value.Text)
+			if err != nil {
+				return "", err
+			}
+		case protocol.TextDocumentContentChangeEventWhole:
+			currentText = value.Text
+			baseAvailable = true
+		case *protocol.TextDocumentContentChangeEventWhole:
+			if value == nil {
+				continue
+			}
+			currentText = value.Text
+			baseAvailable = true
+		default:
+			return "", fmt.Errorf("unsupported text document change type %T", change)
+		}
+	}
+
+	return currentText, nil
+}
+
+func applyTextDocumentContentChange(currentText string, hasBase bool, changeRange *protocol.Range, newText string) (string, bool, error) {
+	if changeRange == nil {
+		return newText, true, nil
+	}
+	if !hasBase {
+		return "", false, fmt.Errorf("incremental change received before document content is available")
+	}
+
+	updatedText, err := applyIncrementalChange(currentText, *changeRange, newText)
+	if err != nil {
+		return "", hasBase, err
+	}
+
+	return updatedText, true, nil
+}
+
+func applyIncrementalChange(text string, changeRange protocol.Range, newText string) (string, error) {
+	start := offsetForPosition(text, changeRange.Start)
+	end := offsetForPosition(text, changeRange.End)
+	if start > end {
+		return "", fmt.Errorf("invalid incremental change range: start=%d end=%d", start, end)
+	}
+	if start < 0 || end < 0 || start > len(text) || end > len(text) {
+		return "", fmt.Errorf("incremental change range out of bounds: start=%d end=%d len=%d", start, end, len(text))
+	}
+	return text[:start] + newText + text[end:], nil
 }
 
 func didClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
@@ -259,7 +326,7 @@ func exit(_ *glsp.Context) error {
 }
 
 func serverCapabilities() protocol.ServerCapabilities {
-	syncKind := protocol.TextDocumentSyncKindFull
+	syncKind := protocol.TextDocumentSyncKindIncremental
 	openClose := true
 
 	// Completion trigger characters
