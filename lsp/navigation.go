@@ -93,14 +93,17 @@ func referencesForPosition(doc *Document, pos protocol.Position, includeDeclarat
 		return []protocol.Location{}
 	}
 
-	declaration, hasDeclaration := selectDeclarationOccurrence(occurrences)
-	if !hasDeclaration {
-		declaration, hasDeclaration = selectDefinitionOccurrence(occurrences)
-	}
+	hasDeclaration := hasDeclarationOccurrence(occurrences)
+	definition, hasDefinition := selectDefinitionOccurrence(occurrences)
 	locations := make([]protocol.Location, 0, len(occurrences))
 	for _, occurrence := range occurrences {
-		if !includeDeclaration && hasDeclaration && sameTokenIndex(occurrence.token, declaration.token) {
-			continue
+		if !includeDeclaration {
+			if hasDeclaration && occurrence.isDeclaration {
+				continue
+			}
+			if !hasDeclaration && hasDefinition && sameTokenIndex(occurrence.token, definition.token) {
+				continue
+			}
 		}
 		locations = append(locations, protocol.Location{
 			URI:   protocol.DocumentUri(doc.URI),
@@ -434,7 +437,11 @@ func tokenRepresentsAssignmentLHS(text string, token antlr.Token, sigil byte) bo
 		index = skipASCIIWhitespaceForward(runes, next)
 	}
 
-	return hasAssignmentOperator(runes, index)
+	if hasAssignmentOperator(runes, index) || hasMutationOperator(runes, index) {
+		return true
+	}
+
+	return hasPrefixMutationOperator(runes, start)
 }
 
 func skipASCIIWhitespaceForward(text []rune, index int) int {
@@ -503,6 +510,43 @@ func hasAssignmentOperator(text []rune, index int) bool {
 	return false
 }
 
+func hasMutationOperator(text []rune, index int) bool {
+	if index < 0 || index+1 >= len(text) {
+		return false
+	}
+
+	if text[index] == '+' && text[index+1] == '+' {
+		return true
+	}
+
+	if text[index] == '-' && text[index+1] == '-' {
+		return true
+	}
+
+	return false
+}
+
+func hasPrefixMutationOperator(text []rune, tokenStart int) bool {
+	index := tokenStart - 1
+	for index >= 0 && isASCIIWhitespaceRune(text[index]) {
+		index--
+	}
+
+	if index < 1 {
+		return false
+	}
+
+	if text[index-1] == '+' && text[index] == '+' {
+		return true
+	}
+
+	if text[index-1] == '-' && text[index] == '-' {
+		return true
+	}
+
+	return false
+}
+
 func isASCIIWhitespaceRune(value rune) bool {
 	switch value {
 	case ' ', '\t', '\n', '\r', '\f', '\v':
@@ -551,6 +595,16 @@ func selectDeclarationOccurrence(occurrences []symbolOccurrence) (symbolOccurren
 	}
 
 	return symbolOccurrence{}, false
+}
+
+func hasDeclarationOccurrence(occurrences []symbolOccurrence) bool {
+	for _, occurrence := range occurrences {
+		if occurrence.isDeclaration {
+			return true
+		}
+	}
+
+	return false
 }
 
 func sortSymbolOccurrences(occurrences []symbolOccurrence) {
