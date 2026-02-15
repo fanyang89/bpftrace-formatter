@@ -16,11 +16,10 @@ type ConfigResolver struct {
 	mu             sync.Mutex
 	workspaceRoots []string
 	settings       map[string]any
-	cache          map[string]*config.Config
 }
 
 func NewConfigResolver() *ConfigResolver {
-	return &ConfigResolver{cache: make(map[string]*config.Config)}
+	return &ConfigResolver{}
 }
 
 func (r *ConfigResolver) SetWorkspaceRoot(root string) {
@@ -31,30 +30,23 @@ func (r *ConfigResolver) SetWorkspaceRoot(root string) {
 	} else {
 		r.workspaceRoots = []string{filepath.Clean(root)}
 	}
-	r.cache = make(map[string]*config.Config)
 }
 
 func (r *ConfigResolver) SetWorkspaceRoots(roots []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.workspaceRoots = normalizeWorkspaceRoots(roots)
-	r.cache = make(map[string]*config.Config)
 }
 
 func (r *ConfigResolver) SetSettings(settings map[string]any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.settings = settings
-	r.cache = make(map[string]*config.Config)
 }
 
-func (r *ConfigResolver) ResolveForDocument(uri string, docPath string) (*config.Config, error) {
+func (r *ConfigResolver) ResolveForDocument(_ string, docPath string) (*config.Config, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	if cached, ok := r.cache[uri]; ok {
-		return cached, nil
-	}
 
 	baseDir := selectWorkspaceRoot(docPath, r.workspaceRoots)
 	if baseDir == "" {
@@ -86,7 +78,6 @@ func (r *ConfigResolver) ResolveForDocument(uri string, docPath string) (*config
 		mergedConfig = merged
 	}
 
-	r.cache[uri] = mergedConfig
 	return mergedConfig, nil
 }
 

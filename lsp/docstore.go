@@ -124,8 +124,20 @@ func (s *DocumentStore) upsert(uri string, version int32, text string) (*Documen
 	}
 
 	parseResult := ParseDocument(text)
+
+	var existingConfig *config.Config
+	var existingPath string
+	s.mu.RLock()
+	if current, ok := s.docs[uri]; ok && current != nil {
+		existingConfig = current.Config
+		existingPath = current.Path
+	}
+	s.mu.RUnlock()
+
 	var resolvedConfig *config.Config
-	if s.resolver != nil {
+	if existingConfig != nil && existingPath == path {
+		resolvedConfig = existingConfig
+	} else if s.resolver != nil {
 		resolvedConfig, err = s.resolver.ResolveForDocument(uri, path)
 		if err != nil {
 			return nil, err

@@ -146,6 +146,13 @@ func formatDocument(uri string) ([]protocol.TextEdit, error) {
 	}
 
 	cfg := doc.Config
+	if configResolver != nil {
+		resolvedConfig, err := configResolver.ResolveForDocument(doc.URI, doc.Path)
+		if err != nil {
+			return nil, err
+		}
+		cfg = resolvedConfig
+	}
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
