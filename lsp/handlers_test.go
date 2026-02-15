@@ -531,6 +531,38 @@ func TestDidDefinition_ReturnsMapDefinition(t *testing.T) {
 	}
 }
 
+func TestDidDefinition_PrefersMacroParameterDeclaration(t *testing.T) {
+	uri := setupTestState(t)
+
+	input := "macro foo(@m) { @m = count(); print(@m); }\n"
+	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+
+	declarationOffset := strings.Index(input, "@m")
+	queryBase := strings.LastIndex(input, "print(@m)")
+	if declarationOffset < 0 || queryBase < 0 {
+		t.Fatalf("failed to locate macro map markers in input")
+	}
+	queryOffset := queryBase + len("print(")
+
+	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	if err != nil {
+		t.Fatalf("didDefinition: %v", err)
+	}
+
+	locations, ok := resultAny.([]protocol.Location)
+	if !ok {
+		t.Fatalf("didDefinition result type = %T, want []protocol.Location", resultAny)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("didDefinition locations = %d, want 1", len(locations))
+	}
+	if locations[0].Range.Start != PositionForOffset(input, declarationOffset) {
+		t.Fatalf("didDefinition start = %+v, want %+v", locations[0].Range.Start, PositionForOffset(input, declarationOffset))
+	}
+}
+
 func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
 	uri := setupTestState(t)
 
