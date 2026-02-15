@@ -251,9 +251,9 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 // and returns the prefix being typed (empty string if just after =).
 // Returns (prefix, true) if in map assignment context, ("", false) otherwise.
 func getMapAssignmentPrefix(line string) (string, bool) {
-	// Find the last = in the line
-	eqIdx := strings.LastIndex(line, "=")
-	if eqIdx < 0 {
+	// Find the last standalone assignment operator (=), not comparison/compound operators.
+	eqIdx, ok := findLastAssignmentOperator(line)
+	if !ok {
 		return "", false
 	}
 
@@ -279,6 +279,29 @@ func getMapAssignmentPrefix(line string) (string, bool) {
 		}
 	}
 	return afterEq, true
+}
+
+func findLastAssignmentOperator(line string) (int, bool) {
+	for i := len(line) - 1; i >= 0; i-- {
+		if line[i] != '=' {
+			continue
+		}
+
+		if i > 0 {
+			switch line[i-1] {
+			case '=', '!', '<', '>', '+', '-', '*', '/', '%':
+				continue
+			}
+		}
+
+		if i+1 < len(line) && line[i+1] == '=' {
+			continue
+		}
+
+		return i, true
+	}
+
+	return 0, false
 }
 
 func isProbeContext(doc *Document, _ protocol.Position, textBefore string) bool {
@@ -518,7 +541,7 @@ func collectMapNames(doc *Document) []string {
 			return
 		}
 
-			if term, ok := node.(antlr.TerminalNode); ok {
+		if term, ok := node.(antlr.TerminalNode); ok {
 			text := term.GetText()
 			if name, found := strings.CutPrefix(text, "@"); found {
 				// Remove any trailing brackets or content
