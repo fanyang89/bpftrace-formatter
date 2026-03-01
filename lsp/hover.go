@@ -111,7 +111,42 @@ func semanticHoverMarkdown(identifier string) (string, bool) {
 		return keywordDoc, true
 	}
 
+	if probe, ok := lookupProbeTarget(identifier); ok {
+		doc := fmt.Sprintf("**%s Probe** `%s`\n\n%s", probe.Category, probe.Name, probe.Description)
+		if len(probe.Arguments) > 0 {
+			doc += "\n\n**Arguments:**\n"
+			for _, arg := range probe.Arguments {
+				doc += fmt.Sprintf("- `%s`\n", arg)
+			}
+		}
+		return doc, true
+	}
+
 	return "", false
+}
+
+func lookupProbeTarget(identifier string) (ProbeDefinition, bool) {
+	for _, probe := range commonKprobes {
+		if probe.Name == identifier {
+			return probe, true
+		}
+	}
+	for _, probe := range commonTracepoints {
+		if probe.Name == identifier {
+			return probe, true
+		}
+	}
+	for _, probe := range softwareEvents {
+		if probe.Name == identifier {
+			return probe, true
+		}
+	}
+	for _, probe := range hardwareEvents {
+		if probe.Name == identifier {
+			return probe, true
+		}
+	}
+	return ProbeDefinition{}, false
 }
 
 func lookupProbeType(identifier string) (struct {

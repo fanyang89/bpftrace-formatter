@@ -152,6 +152,8 @@ func CompletionForPosition(doc *Document, pos protocol.Position) []protocol.Comp
 	switch context.kind {
 	case contextProbeStart:
 		return probeTypeCompletions()
+	case contextProbeTarget:
+		return probeTargetCompletions(context.probeType, context.prefix)
 	case contextMapName:
 		return mapCompletions(doc, context.prefix)
 	case contextVariable:
@@ -177,11 +179,13 @@ const (
 	contextFunctionCall
 	contextMapFunction
 	contextStatement
+	contextProbeTarget
 )
 
 type completionContext struct {
-	kind   completionContextKind
-	prefix string
+	kind      completionContextKind
+	prefix    string
+	probeType string
 }
 
 func determineCompletionContext(doc *Document, pos protocol.Position) completionContext {
@@ -225,6 +229,11 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 		}
 	}
 
+	// Check if we're typing a probe target (e.g., kprobe:vfs_r, tracepoint:syscalls:sys_enter_)
+	if probeType, prefix := extractProbeTarget(trimmed); probeType != "" {
+		return completionContext{kind: contextProbeTarget, prefix: prefix, probeType: probeType}
+	}
+
 	// Check if we're at the start of a probe definition
 	if isProbeContext(doc, pos, textBefore) {
 		return completionContext{kind: contextProbeStart, prefix: trimmed}
@@ -242,6 +251,67 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 	}
 
 	return completionContext{kind: contextUnknown}
+}
+
+func extractProbeTarget(line string) (probeType string, prefix string) {
+	probeTypes := []string{"kprobe", "kretprobe", "uprobe", "uretprobe", "tracepoint", "usdt", "software", "hardware"}
+
+	for _, pt := range probeTypes {
+		pattern := pt + ":"
+		if !strings.Contains(line, pattern) {
+			continue
+		}
+
+		idx := strings.LastIndex(line, pattern)
+		if idx < 0 {
+			continue
+		}
+
+		afterPattern := line[idx+len(pattern):]
+
+		if isInStringOrComment(line[:idx+len(pattern)]) {
+			continue
+		}
+
+		var funcPart string
+		if pt == "tracepoint" || pt == "usdt" {
+			parts := strings.Split(afterPattern, ":")
+			if len(parts) >= 2 {
+				prefix = parts[len(parts)-1]
+				funcPart = prefix
+			} else if len(parts) == 1 && strings.Contains(afterPattern, ":") {
+				prefix = ""
+				funcPart = ""
+			} else {
+				prefix = parts[0]
+				funcPart = prefix
+			}
+		} else if pt == "uprobe" || pt == "uretprobe" {
+			colonIdx := strings.LastIndex(afterPattern, ":")
+			if colonIdx >= 0 {
+				prefix = afterPattern[colonIdx+1:]
+				funcPart = prefix
+			} else {
+				prefix = afterPattern
+				funcPart = prefix
+			}
+		} else {
+			prefix = afterPattern
+			funcPart = afterPattern
+		}
+
+		if strings.ContainsAny(prefix, " {") {
+			return "", ""
+		}
+
+		if strings.Contains(funcPart, "/") {
+			return "", ""
+		}
+
+		return pt, prefix
+	}
+
+	return "", ""
 }
 
 // getMapAssignmentPrefix checks if cursor is right after = in a map assignment
@@ -1115,4 +1185,52 @@ func isValidIdentifier(s string) bool {
 		}
 	}
 	return true
+}
+
+func probeTargetCompletions(probeType, prefix string) []protocol.CompletionItem {
+	probes := getProbeDefinitions(probeType)
+	if probes == nil {
+		return nil
+	}
+
+	items := make([]protocol.CompletionItem, 0)
+	for _, probe := range probes {
+		displayName := probe.Name
+		filterName := probe.Name
+
+		if probeType == "tracepoint" || probeType == "usdt" {
+			if idx := strings.LastIndex(probe.Name, ":"); idx >= 0 {
+				displayName = probe.Name[idx+1:]
+				filterName = displayName
+			}
+		}
+
+		if prefix == "" || strings.HasPrefix(filterName, prefix) {
+			detail := probe.Description
+			if probe.Category != "" {
+				detail = fmt.Sprintf("%s (%s)", probe.Description, probe.Category)
+			}
+
+			doc := probe.Description
+			if len(probe.Arguments) > 0 {
+				doc += "\n\nArguments:\n"
+				for _, arg := range probe.Arguments {
+					doc += fmt.Sprintf("  %s\n", arg)
+				}
+			}
+
+			sortText := rankedSortText(10, displayName)
+			items = append(items, protocol.CompletionItem{
+				Label:         displayName,
+				Kind:          &kindEvent,
+				Detail:        &detail,
+				Documentation: doc,
+				SortText:      &sortText,
+				FilterText:    &filterName,
+			})
+		}
+	}
+
+	sortCompletionItems(items)
+	return items
 }
