@@ -62,7 +62,7 @@ func hoverForPosition(doc *Document, pos protocol.Position) *protocol.Hover {
 	}
 
 	if info, ok := identifierAtPosition(doc.Text, pos); ok && !info.sigilPrefixed && info.semanticContext {
-		if markdown, ok := semanticHoverMarkdown(info.value); ok {
+		if markdown, ok := semanticHoverMarkdown(info.value, info.probeType); ok {
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.MarkupKindMarkdown,
@@ -91,7 +91,7 @@ func HoverForPosition(doc *Document, pos protocol.Position) *protocol.Hover {
 	return hoverForPosition(doc, pos)
 }
 
-func semanticHoverMarkdown(identifier string) (string, bool) {
+func semanticHoverMarkdown(identifier, probeType string) (string, bool) {
 	if probe, ok := lookupProbeType(identifier); ok {
 		return fmt.Sprintf("**Probe Type** `%s`\n\n```bpftrace\n%s\n```\n\n%s", probe.name, probe.detail, probe.doc), true
 	}
@@ -111,7 +111,7 @@ func semanticHoverMarkdown(identifier string) (string, bool) {
 		return keywordDoc, true
 	}
 
-	if probe, ok := lookupProbeTarget(identifier); ok {
+	if probe, ok := lookupProbeTarget(identifier, probeType); ok {
 		doc := fmt.Sprintf("**%s Probe** `%s`\n\n%s", probe.Category, probe.Name, probe.Description)
 		if len(probe.Arguments) > 0 {
 			doc += "\n\n**Arguments:**\n"
@@ -125,9 +125,27 @@ func semanticHoverMarkdown(identifier string) (string, bool) {
 	return "", false
 }
 
-func lookupProbeTarget(identifier string) (ProbeDefinition, bool) {
-	// Check tracepoints first so that short names shared with kprobes
-	// (e.g. "kmalloc", "net_dev_xmit") resolve to the tracepoint definition.
+func lookupProbeTarget(identifier, probeType string) (ProbeDefinition, bool) {
+	// When the probe type is known from context, scope the search to that type's
+	// definitions. This prevents "kmalloc" (in kprobe:kmalloc) from resolving to
+	// the tracepoint "kmem:kmalloc", and vice-versa.
+	if probeType != "" {
+		defs := getProbeDefinitions(probeType)
+		for _, probe := range defs {
+			if probe.Name == identifier {
+				return probe, true
+			}
+			// Short-name match for tracepoints ("category:name" → "name").
+			if probeType == "tracepoint" {
+				if idx := strings.LastIndex(probe.Name, ":"); idx >= 0 && probe.Name[idx+1:] == identifier {
+					return probe, true
+				}
+			}
+		}
+		return ProbeDefinition{}, false
+	}
+	// No probe type context: search all, preferring tracepoints so that shared
+	// short names (e.g. "kmalloc") resolve to the more specific definition.
 	for _, probe := range commonTracepoints {
 		if probe.Name == identifier {
 			return probe, true
@@ -231,6 +249,7 @@ type identifierInfo struct {
 	rangeValue      protocol.Range
 	sigilPrefixed   bool
 	semanticContext bool
+	probeType       string
 }
 
 func identifierAtPosition(text string, pos protocol.Position) (*identifierInfo, bool) {
@@ -253,8 +272,65 @@ func identifierAtPosition(text string, pos protocol.Position) (*identifierInfo, 
 		rangeValue:      rangeValue,
 		sigilPrefixed:   sigilPrefixed,
 		semanticContext: isSemanticIdentifierContext(text, start),
+		probeType:       probeTypeBeforeIdentifier(text, start),
 	}
 	return info, true
+}
+
+// probeTypeBeforeIdentifier returns the probe type keyword (e.g. "kprobe",
+// "tracepoint") when the identifier immediately follows a "probeType:name" or
+// "probeType:category:name" pattern. Returns "" when no probe type is detected.
+func probeTypeBeforeIdentifier(text string, identifierStart int) string {
+	if identifierStart <= 0 || identifierStart > len(text) {
+		return ""
+	}
+	if text[identifierStart-1] != ':' {
+		return ""
+	}
+
+	// Find the word ending at the ':' before the identifier.
+	colonIdx := identifierStart - 1
+	wordEnd := colonIdx
+	wordStart := wordEnd
+	for wordStart > 0 && isIdentifierByte(text[wordStart-1]) {
+		wordStart--
+	}
+	if wordStart >= wordEnd {
+		return ""
+	}
+	word := text[wordStart:wordEnd]
+	if isKnownProbeType(word) {
+		return word
+	}
+
+	// word may be a category segment (e.g. "kmem" in "tracepoint:kmem:kmalloc").
+	// Look one level further back.
+	if wordStart <= 0 || text[wordStart-1] != ':' {
+		return ""
+	}
+	colonIdx2 := wordStart - 1
+	wordEnd2 := colonIdx2
+	wordStart2 := wordEnd2
+	for wordStart2 > 0 && isIdentifierByte(text[wordStart2-1]) {
+		wordStart2--
+	}
+	if wordStart2 >= wordEnd2 {
+		return ""
+	}
+	outerWord := text[wordStart2:wordEnd2]
+	if isKnownProbeType(outerWord) {
+		return outerWord
+	}
+	return ""
+}
+
+func isKnownProbeType(word string) bool {
+	for _, p := range probeTypes {
+		if p.name == word {
+			return true
+		}
+	}
+	return false
 }
 
 func isSemanticIdentifierContext(text string, identifierStart int) bool {
