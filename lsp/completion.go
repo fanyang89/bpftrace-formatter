@@ -274,16 +274,12 @@ func extractProbeTarget(line string) (probeType string, prefix string) {
 		}
 
 		var funcPart string
-		if pt == "tracepoint" || pt == "usdt" {
-			colonIdx := strings.LastIndex(afterPattern, ":")
-			if colonIdx >= 0 {
-				prefix = afterPattern[colonIdx+1:]
-				funcPart = prefix
-			} else {
-				prefix = afterPattern
-				funcPart = prefix
-			}
-		} else if pt == "uprobe" || pt == "uretprobe" {
+		if pt == "tracepoint" {
+			// Return the full afterPattern so callers can tell whether the
+			// category segment has already been typed (contains a colon) or not.
+			prefix = afterPattern
+			funcPart = afterPattern
+		} else if pt == "usdt" || pt == "uprobe" || pt == "uretprobe" {
 			colonIdx := strings.LastIndex(afterPattern, ":")
 			if colonIdx >= 0 {
 				prefix = afterPattern[colonIdx+1:]
@@ -1195,37 +1191,52 @@ func probeTargetCompletions(probeType, prefix string) []protocol.CompletionItem 
 		displayName := probe.Name
 		filterName := probe.Name
 
-		if probeType == "tracepoint" || probeType == "usdt" {
-			if idx := strings.LastIndex(probe.Name, ":"); idx >= 0 {
-				displayName = probe.Name[idx+1:]
-				filterName = displayName
-			}
-		}
-
-		if prefix == "" || strings.HasPrefix(filterName, prefix) {
-			detail := probe.Description
-			if probe.Category != "" {
-				detail = fmt.Sprintf("%s (%s)", probe.Description, probe.Category)
-			}
-
-			doc := probe.Description
-			if len(probe.Arguments) > 0 {
-				doc += "\n\nArguments:\n"
-				for _, arg := range probe.Arguments {
-					doc += fmt.Sprintf("  %s\n", arg)
+		if probeType == "tracepoint" {
+			// prefix is the full text after "tracepoint:".
+			// If it contains a colon the category segment has already been typed,
+			// so we show and insert only the name portion.  If not, we show the
+			// full "category:name" form so the inserted text is valid.
+			if colonIdx := strings.LastIndex(prefix, ":"); colonIdx >= 0 {
+				categoryPrefix := prefix[:colonIdx]
+				namePrefix := prefix[colonIdx+1:]
+				if !strings.HasPrefix(probe.Name, categoryPrefix+":") {
+					continue
 				}
+				nameStart := strings.LastIndex(probe.Name, ":") + 1
+				displayName = probe.Name[nameStart:]
+				filterName = displayName
+				if namePrefix != "" && !strings.HasPrefix(filterName, namePrefix) {
+					continue
+				}
+			} else if prefix != "" && !strings.HasPrefix(probe.Name, prefix) {
+				continue
 			}
-
-			sortText := rankedSortText(10, displayName)
-			items = append(items, protocol.CompletionItem{
-				Label:         displayName,
-				Kind:          &kindEvent,
-				Detail:        &detail,
-				Documentation: doc,
-				SortText:      &sortText,
-				FilterText:    &filterName,
-			})
+		} else if prefix != "" && !strings.HasPrefix(filterName, prefix) {
+			continue
 		}
+
+		detail := probe.Description
+		if probe.Category != "" {
+			detail = fmt.Sprintf("%s (%s)", probe.Description, probe.Category)
+		}
+
+		doc := probe.Description
+		if len(probe.Arguments) > 0 {
+			doc += "\n\nArguments:\n"
+			for _, arg := range probe.Arguments {
+				doc += fmt.Sprintf("  %s\n", arg)
+			}
+		}
+
+		sortText := rankedSortText(10, displayName)
+		items = append(items, protocol.CompletionItem{
+			Label:         displayName,
+			Kind:          &kindEvent,
+			Detail:        &detail,
+			Documentation: doc,
+			SortText:      &sortText,
+			FilterText:    &filterName,
+		})
 	}
 
 	sortCompletionItems(items)
