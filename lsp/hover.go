@@ -126,16 +126,18 @@ func semanticHoverMarkdown(identifier string) (string, bool) {
 }
 
 func lookupProbeTarget(identifier string) (ProbeDefinition, bool) {
-	for _, probe := range commonKprobes {
-		if probe.Name == identifier {
-			return probe, true
-		}
-	}
+	// Check tracepoints first so that short names shared with kprobes
+	// (e.g. "kmalloc", "net_dev_xmit") resolve to the tracepoint definition.
 	for _, probe := range commonTracepoints {
 		if probe.Name == identifier {
 			return probe, true
 		}
 		if idx := strings.LastIndex(probe.Name, ":"); idx >= 0 && probe.Name[idx+1:] == identifier {
+			return probe, true
+		}
+	}
+	for _, probe := range commonKprobes {
+		if probe.Name == identifier {
 			return probe, true
 		}
 	}

@@ -220,6 +220,36 @@ func TestHoverForPosition_TracepointByShortName(t *testing.T) {
 	}
 }
 
+func TestHoverForPosition_TracepointShortNamePreferredOverKprobe(t *testing.T) {
+	// "kmalloc" exists in both commonKprobes and commonTracepoints ("kmem:kmalloc").
+	// Hovering over the short name in a tracepoint context must return the tracepoint.
+	input := "tracepoint:kmem:kmalloc { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "kmalloc")
+	if offset < 0 {
+		t.Fatalf("missing kmalloc in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+2))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	// The tracepoint full name "kmem:kmalloc" should appear, proving we got the
+	// tracepoint definition and not the kprobe (which has only "kmalloc").
+	if !strings.Contains(content.Value, "kmem:kmalloc") {
+		t.Fatalf("expected tracepoint full name kmem:kmalloc, got %q", content.Value)
+	}
+}
+
 func TestHoverForPosition_MultilineFieldAccessFallsBackToSyntaxHover(t *testing.T) {
 	input := "kprobe:sys_clone {\n  printf(\"%d\", args.\n    pid);\n}\n"
 	result := ParseDocument(input)
