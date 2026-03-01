@@ -34,7 +34,7 @@ func TestExtractProbeTarget(t *testing.T) {
 			name:          "tracepoint syscall name",
 			line:          "tracepoint:syscalls:sys_enter_rea",
 			wantProbeType: "tracepoint",
-			wantPrefix:    "sys_enter_rea",
+			wantPrefix:    "syscalls:sys_enter_rea",
 		},
 		{
 			name:          "tracepoint category",
@@ -116,9 +116,11 @@ func TestProbeTargetCompletions_Kprobe(t *testing.T) {
 }
 
 func TestProbeTargetCompletions_Tracepoint(t *testing.T) {
-	items := probeTargetCompletions("tracepoint", "sys_enter_rea")
+	// When the category has been typed (prefix contains a colon), only the name
+	// portion is shown so the editor inserts just the name after "tracepoint:category:".
+	items := probeTargetCompletions("tracepoint", "syscalls:sys_enter_rea")
 	if len(items) == 0 {
-		t.Error("expected tracepoint completions for sys_enter_rea")
+		t.Error("expected tracepoint completions for syscalls:sys_enter_rea")
 	}
 
 	found := make(map[string]bool)
@@ -130,6 +132,30 @@ func TestProbeTargetCompletions_Tracepoint(t *testing.T) {
 	}
 
 	expected := []string{"sys_enter_read", "sys_enter_readv"}
+	for _, e := range expected {
+		if !found[e] {
+			t.Errorf("expected completion %q not found", e)
+		}
+	}
+}
+
+func TestProbeTargetCompletions_Tracepoint_NoCategoryTyped(t *testing.T) {
+	// When no category has been typed yet (prefix has no colon), completions use the
+	// full "category:name" form so the editor inserts a valid probe target.
+	items := probeTargetCompletions("tracepoint", "")
+	if len(items) == 0 {
+		t.Error("expected tracepoint completions")
+	}
+
+	found := make(map[string]bool)
+	for _, item := range items {
+		found[item.Label] = true
+		if !strings.Contains(item.Label, ":") {
+			t.Errorf("completion %q is missing category prefix", item.Label)
+		}
+	}
+
+	expected := []string{"syscalls:sys_enter_read", "syscalls:sys_enter_write", "sched:sched_switch"}
 	for _, e := range expected {
 		if !found[e] {
 			t.Errorf("expected completion %q not found", e)
