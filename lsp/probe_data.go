@@ -321,9 +321,6 @@ var commonTracepoints = []ProbeDefinition{
 	{Name: "syscalls:sys_enter_ioctl", Category: "Syscalls", Description: "Enter ioctl syscall", Arguments: []string{"fd", "cmd", "arg"}},
 	{Name: "syscalls:sys_exit_ioctl", Category: "Syscalls", Description: "Exit ioctl syscall", Arguments: []string{"ret"}},
 
-	{Name: "syscalls:sys_enter_dup", Category: "Syscalls", Description: "Enter dup syscall", Arguments: []string{"fildes"}},
-	{Name: "syscalls:sys_exit_dup", Category: "Syscalls", Description: "Exit dup syscall", Arguments: []string{"ret"}},
-
 	{Name: "sched:sched_switch", Category: "Scheduler", Description: "Task switch"},
 	{Name: "sched:sched_wakeup", Category: "Scheduler", Description: "Task wakeup"},
 	{Name: "sched:sched_wakeup_new", Category: "Scheduler", Description: "New task wakeup"},
