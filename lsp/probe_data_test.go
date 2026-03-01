@@ -262,10 +262,8 @@ func TestProbeDataIntegrity(t *testing.T) {
 	checkProbes := func(probes []ProbeDefinition, source string) {
 		for _, probe := range probes {
 			if existing, ok := seen[probe.Name]; ok {
-				if existing != source {
-					t.Errorf("duplicate probe name %q in %s (already in %s)",
-						probe.Name, source, existing)
-				}
+				t.Errorf("duplicate probe name %q in %s (already in %s)",
+					probe.Name, source, existing)
 			}
 			seen[probe.Name] = source
 		}
