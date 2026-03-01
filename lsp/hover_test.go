@@ -191,6 +191,35 @@ func TestHoverForPosition_FieldAccessFallsBackToSyntaxHover(t *testing.T) {
 	}
 }
 
+func TestHoverForPosition_TracepointByShortName(t *testing.T) {
+	input := "tracepoint:syscalls:sys_enter_read { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "sys_enter_read")
+	if offset < 0 {
+		t.Fatalf("missing sys_enter_read in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+2))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	if !strings.Contains(content.Value, "Probe") {
+		t.Fatalf("expected probe heading, got %q", content.Value)
+	}
+	if !strings.Contains(content.Value, "sys_enter_read") {
+		t.Fatalf("expected tracepoint name, got %q", content.Value)
+	}
+}
+
 func TestHoverForPosition_MultilineFieldAccessFallsBackToSyntaxHover(t *testing.T) {
 	input := "kprobe:sys_clone {\n  printf(\"%d\", args.\n    pid);\n}\n"
 	result := ParseDocument(input)

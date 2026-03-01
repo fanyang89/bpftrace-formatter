@@ -135,6 +135,9 @@ func lookupProbeTarget(identifier string) (ProbeDefinition, bool) {
 		if probe.Name == identifier {
 			return probe, true
 		}
+		if idx := strings.LastIndex(probe.Name, ":"); idx >= 0 && probe.Name[idx+1:] == identifier {
+			return probe, true
+		}
 	}
 	for _, probe := range softwareEvents {
 		if probe.Name == identifier {
