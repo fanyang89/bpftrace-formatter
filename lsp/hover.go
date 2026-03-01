@@ -126,27 +126,32 @@ func semanticHoverMarkdown(identifier string) (string, bool) {
 }
 
 func lookupProbeTarget(identifier string) (ProbeDefinition, bool) {
-	for _, probe := range commonKprobes {
-		if probe.Name == identifier {
-			return probe, true
-		}
-	}
-	for _, probe := range commonTracepoints {
-		if probe.Name == identifier {
-			return probe, true
-		}
-	}
-	for _, probe := range softwareEvents {
-		if probe.Name == identifier {
-			return probe, true
-		}
-	}
-	for _, probe := range hardwareEvents {
-		if probe.Name == identifier {
-			return probe, true
+	for _, probeList := range [][]ProbeDefinition{commonKprobes, commonTracepoints, softwareEvents, hardwareEvents} {
+		for _, probe := range probeList {
+			if probeNameMatchesToken(probe.Name, identifier) {
+				return probe, true
+			}
 		}
 	}
 	return ProbeDefinition{}, false
+}
+
+// probeNameMatchesToken reports whether identifier matches probeName either
+// exactly or as any colon- or dash-separated component of the name.
+// This allows hover to work for tracepoints like "syscalls:sys_enter_read"
+// (token "sys_enter_read") and software/hardware events like "cpu-clock"
+// (token "cpu"), because the hover tokenizer only captures [a-zA-Z0-9_].
+func probeNameMatchesToken(probeName, token string) bool {
+	if probeName == token {
+		return true
+	}
+	split := func(r rune) bool { return r == ':' || r == '-' }
+	for _, part := range strings.FieldsFunc(probeName, split) {
+		if part == token {
+			return true
+		}
+	}
+	return false
 }
 
 func lookupProbeType(identifier string) (struct {

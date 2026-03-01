@@ -242,3 +242,56 @@ func TestHoverForPosition_CommentFallsBackToSyntaxHover(t *testing.T) {
 		t.Fatalf("expected non-semantic hover in comment, got %q", content.Value)
 	}
 }
+
+func TestHoverForPosition_TracepointEventNameMarkdown(t *testing.T) {
+	input := "tracepoint:syscalls:sys_enter_read { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "sys_enter_read")
+	if offset < 0 {
+		t.Fatalf("missing sys_enter_read in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+2))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	if !strings.Contains(content.Value, "sys_enter_read") {
+		t.Fatalf("expected tracepoint name in hover, got %q", content.Value)
+	}
+}
+
+func TestHoverForPosition_SoftwareEventComponentMarkdown(t *testing.T) {
+	// "bpf" is a dash-separated component of "bpf-output" and is not a builtin.
+	input := "software:bpf-output { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "bpf")
+	if offset < 0 {
+		t.Fatalf("missing bpf in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+1))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	if !strings.Contains(content.Value, "bpf-output") {
+		t.Fatalf("expected bpf-output probe in hover, got %q", content.Value)
+	}
+}
