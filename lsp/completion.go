@@ -275,15 +275,12 @@ func extractProbeTarget(line string) (probeType string, prefix string) {
 
 		var funcPart string
 		if pt == "tracepoint" || pt == "usdt" {
-			parts := strings.Split(afterPattern, ":")
-			if len(parts) >= 2 {
-				prefix = parts[len(parts)-1]
+			colonIdx := strings.LastIndex(afterPattern, ":")
+			if colonIdx >= 0 {
+				prefix = afterPattern[colonIdx+1:]
 				funcPart = prefix
-			} else if len(parts) == 1 && strings.Contains(afterPattern, ":") {
-				prefix = ""
-				funcPart = ""
 			} else {
-				prefix = parts[0]
+				prefix = afterPattern
 				funcPart = prefix
 			}
 		} else if pt == "uprobe" || pt == "uretprobe" {
