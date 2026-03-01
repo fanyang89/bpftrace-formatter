@@ -181,7 +181,7 @@ var commonTracepoints = []ProbeDefinition{
 	{Name: "syscalls:sys_exit_execveat", Category: "Syscalls", Description: "Exit execveat syscall", Arguments: []string{"ret"}},
 	{Name: "syscalls:sys_enter_fork", Category: "Syscalls", Description: "Enter fork syscall"},
 	{Name: "syscalls:sys_exit_fork", Category: "Syscalls", Description: "Exit fork syscall", Arguments: []string{"ret"}},
-	{Name: "syscalls:sys_enter_clone", Category: "Syscalls", Description: "Enter clone syscall", Arguments: []string{"clone_flags", " newsp", " parent_tidptr", " child_tidptr", " tls"}},
+	{Name: "syscalls:sys_enter_clone", Category: "Syscalls", Description: "Enter clone syscall", Arguments: []string{"clone_flags", "newsp", "parent_tidptr", "child_tidptr", "tls"}},
 	{Name: "syscalls:sys_exit_clone", Category: "Syscalls", Description: "Exit clone syscall", Arguments: []string{"ret"}},
 	{Name: "syscalls:sys_enter_vfork", Category: "Syscalls", Description: "Enter vfork syscall"},
 	{Name: "syscalls:sys_exit_vfork", Category: "Syscalls", Description: "Exit vfork syscall", Arguments: []string{"ret"}},
