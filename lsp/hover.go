@@ -145,6 +145,10 @@ func probeNameMatchesToken(probeName, token string) bool {
 	if probeName == token {
 		return true
 	}
+	// Component matching is only possible when the name contains ':' or '-'.
+	if !strings.ContainsAny(probeName, ":-") {
+		return false
+	}
 	split := func(r rune) bool { return r == ':' || r == '-' }
 	for _, part := range strings.FieldsFunc(probeName, split) {
 		if part == token {
