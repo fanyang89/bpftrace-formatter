@@ -127,7 +127,13 @@ func parseProgramWithMode(tokenStream *antlr.CommonTokenStream, mode int) (parse
 
 // writeString writes a string to the output
 func (f *ASTFormatter) writeString(s string) {
-	if f.pendingSpace && !f.isWhitespace(s) {
+	if s == "" {
+		return
+	}
+
+	isWS := f.isWhitespace(s)
+
+	if f.pendingSpace && !isWS {
 		if f.needIndent {
 			f.pendingSpace = false
 		} else {
@@ -148,25 +154,19 @@ func (f *ASTFormatter) writeString(s string) {
 		}
 	}
 
-	if f.needIndent && !f.isWhitespace(s) {
+	if f.needIndent && !isWS {
 		f.writeIndent()
 	}
 	f.output.WriteString(s)
 
-	if s == "" {
-		return
-	}
-
-	if strings.Contains(s, "\n") {
-		lastNewline := strings.LastIndex(s, "\n")
-		f.lineLength = len(s) - lastNewline - 1
-		f.lastWasNewline = strings.HasSuffix(s, "\n")
+	if idx := strings.LastIndexByte(s, '\n'); idx >= 0 {
+		f.lineLength = len(s) - idx - 1
+		f.lastWasNewline = idx == len(s)-1
 		f.needIndent = f.lastWasNewline
-		return
+	} else {
+		f.lineLength += len(s)
+		f.lastWasNewline = false
 	}
-
-	f.lineLength += len(s)
-	f.lastWasNewline = false
 }
 
 // writeIndent writes the current indentation
@@ -180,14 +180,19 @@ func (f *ASTFormatter) writeIndentLevel(level int) {
 	if level < 0 {
 		level = 0
 	}
-	var indent string
+
+	count := level
+	indentChar := byte('\t')
 	if f.config.Indent.UseSpaces {
-		indent = strings.Repeat(" ", level*f.config.Indent.Size)
-	} else {
-		indent = strings.Repeat("\t", level)
+		indentChar = ' '
+		count = level * f.config.Indent.Size
 	}
-	f.output.WriteString(indent)
-	f.lineLength += len(indent)
+
+	for i := 0; i < count; i++ {
+		f.output.WriteByte(indentChar)
+	}
+
+	f.lineLength += count
 	f.lastWasNewline = false
 	f.needIndent = false
 }
@@ -234,8 +239,24 @@ func (f *ASTFormatter) decreaseIndent() {
 
 // isWhitespace checks if a string contains only whitespace
 func (f *ASTFormatter) isWhitespace(s string) bool {
-	for _, r := range s {
-		if !unicode.IsSpace(r) {
+	if len(s) == 0 {
+		return true
+	}
+
+	// Fast path for ASCII
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b > 127 {
+			// Fallback to unicode.IsSpace for non-ASCII
+			for _, r := range s[i:] {
+				if !unicode.IsSpace(r) {
+					return false
+				}
+			}
+			return true
+		}
+		// ASCII whitespace characters: ' ', '\t', '\n', '\v', '\f', '\r'
+		if !(b == ' ' || (b >= 0x09 && b <= 0x0d)) {
 			return false
 		}
 	}
