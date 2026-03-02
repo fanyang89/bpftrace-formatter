@@ -253,6 +253,36 @@ func TestHoverForPosition_TracepointShortNamePreferredOverKprobe(t *testing.T) {
 func TestHoverForPosition_KprobeShortNameNotShadowedByTracepoint(t *testing.T) {
 	// "kmalloc" exists in both commonKprobes and commonTracepoints ("kmem:kmalloc").
 	// Hovering over the short name in a kprobe context must return the kprobe,
+	// not the tracepoint. In particular, the tracepoint full name "kmem:kmalloc"
+	// must not appear in the hover contents.
+	input := "kprobe:kmalloc { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "kmalloc")
+	if offset < 0 {
+		t.Fatalf("missing kmalloc in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+2))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	// Ensure we did not resolve to the tracepoint "kmem:kmalloc".
+	if strings.Contains(content.Value, "kmem:kmalloc") {
+		t.Fatalf("unexpected tracepoint full name kmem:kmalloc in hover, got %q", content.Value)
+	}
+}
+func TestHoverForPosition_KprobeShortNameNotShadowedByTracepoint(t *testing.T) {
+	// "kmalloc" exists in both commonKprobes and commonTracepoints ("kmem:kmalloc").
+	// Hovering over the short name in a kprobe context must return the kprobe,
 	// not the tracepoint.
 	input := "kprobe:kmalloc { @x = count(); }\n"
 	result := ParseDocument(input)
