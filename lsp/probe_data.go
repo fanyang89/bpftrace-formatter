@@ -456,6 +456,8 @@ func getProbeDefinitions(probeType string) []ProbeDefinition {
 		return softwareEvents
 	case "hardware":
 		return hardwareEvents
+	case "uprobe", "uretprobe", "usdt":
+		return nil
 	default:
 		return nil
 	}

@@ -254,9 +254,8 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 }
 
 func extractProbeTarget(line string) (probeType string, prefix string) {
-	probeTypes := []string{"kprobe", "kretprobe", "uprobe", "uretprobe", "tracepoint", "usdt", "software", "hardware"}
-
-	for _, pt := range probeTypes {
+	for _, p := range probeTypes {
+		pt := p.name
 		pattern := pt + ":"
 		if !strings.Contains(line, pattern) {
 			continue
