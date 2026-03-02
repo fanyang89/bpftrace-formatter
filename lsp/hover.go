@@ -290,15 +290,18 @@ func probeTypeBeforeIdentifier(text string, identifierStart int) string {
 
 	// Find the word ending at the ':' before the identifier.
 	colonIdx := prev
-	wordEnd := colonIdx
+	wordEnd := previousNonSpaceByteIndex(text, colonIdx-1)
+	if wordEnd < 0 {
+		return ""
+	}
 	wordStart := wordEnd
 	for wordStart > 0 && isIdentifierByte(text[wordStart-1]) {
 		wordStart--
 	}
-	if wordStart >= wordEnd {
+	if wordStart > wordEnd {
 		return ""
 	}
-	word := text[wordStart:wordEnd]
+	word := text[wordStart : wordEnd+1]
 	if isKnownProbeType(word) {
 		return word
 	}
@@ -312,15 +315,18 @@ func probeTypeBeforeIdentifier(text string, identifierStart int) string {
 	if colonIdx2 < 0 || text[colonIdx2] != ':' {
 		return ""
 	}
-	wordEnd2 := colonIdx2
+	wordEnd2 := previousNonSpaceByteIndex(text, colonIdx2-1)
+	if wordEnd2 < 0 {
+		return ""
+	}
 	wordStart2 := wordEnd2
 	for wordStart2 > 0 && isIdentifierByte(text[wordStart2-1]) {
 		wordStart2--
 	}
-	if wordStart2 >= wordEnd2 {
+	if wordStart2 > wordEnd2 {
 		return ""
 	}
-	outerWord := text[wordStart2:wordEnd2]
+	outerWord := text[wordStart2 : wordEnd2+1]
 	if isKnownProbeType(outerWord) {
 		return outerWord
 	}
