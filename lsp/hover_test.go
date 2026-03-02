@@ -311,6 +311,63 @@ func TestHoverForPosition_KprobeShortNameNotShadowedByTracepoint(t *testing.T) {
 	}
 }
 
+func TestHoverForPosition_KprobeShortNameWithWhitespace(t *testing.T) {
+	// "kmalloc" exists in both commonKprobes and commonTracepoints ("kmem:kmalloc").
+	// Grammar allows whitespace around probe separators; "kprobe: kmalloc" must
+	// still resolve to kprobe, not tracepoint.
+	input := "kprobe: kmalloc { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "kmalloc")
+	if offset < 0 {
+		t.Fatalf("missing kmalloc in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+2))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	if strings.Contains(content.Value, "kmem:kmalloc") {
+		t.Fatalf("unexpected tracepoint full name kmem:kmalloc in kprobe hover with whitespace, got %q", content.Value)
+	}
+}
+
+func TestHoverForPosition_TracepointShortNameWithWhitespace(t *testing.T) {
+	// "kmalloc" exists in both commonKprobes and commonTracepoints ("kmem:kmalloc").
+	// With whitespace: "tracepoint:kmem: kmalloc" must resolve to tracepoint.
+	input := "tracepoint:kmem: kmalloc { @x = count(); }\n"
+	result := ParseDocument(input)
+	doc := &Document{Text: input, ParseResult: result}
+
+	offset := strings.Index(input, "kmalloc")
+	if offset < 0 {
+		t.Fatalf("missing kmalloc in input")
+	}
+
+	hover := HoverForPosition(doc, PositionForOffset(input, offset+2))
+	if hover == nil {
+		t.Fatalf("expected hover")
+	}
+	content, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected markup content, got %T", hover.Contents)
+	}
+	if content.Kind != protocol.MarkupKindMarkdown {
+		t.Fatalf("markup kind = %s, want %s", content.Kind, protocol.MarkupKindMarkdown)
+	}
+	if !strings.Contains(content.Value, "kmem:kmalloc") {
+		t.Fatalf("expected tracepoint full name kmem:kmalloc with whitespace, got %q", content.Value)
+	}
+}
+
 func TestHoverForPosition_MultilineFieldAccessFallsBackToSyntaxHover(t *testing.T) {
 	input := "kprobe:sys_clone {\n  printf(\"%d\", args.\n    pid);\n}\n"
 	result := ParseDocument(input)

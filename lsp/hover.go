@@ -144,13 +144,12 @@ func lookupProbeTarget(identifier, probeType string) (ProbeDefinition, bool) {
 		}
 		return ProbeDefinition{}, false
 	}
-	// No probe type context: search all, preferring tracepoints so that shared
-	// short names (e.g. "kmalloc") resolve to the more specific definition.
+	// No probe type context: search all, exact matches only.
+	// Short-name matching is only performed when probeType is known (above),
+	// to prevent "kmalloc" in kprobe context from incorrectly resolving to
+	// tracepoint "kmem:kmalloc".
 	for _, probe := range commonTracepoints {
 		if probe.Name == identifier {
-			return probe, true
-		}
-		if idx := strings.LastIndex(probe.Name, ":"); idx >= 0 && probe.Name[idx+1:] == identifier {
 			return probe, true
 		}
 	}
@@ -284,12 +283,13 @@ func probeTypeBeforeIdentifier(text string, identifierStart int) string {
 	if identifierStart <= 0 || identifierStart > len(text) {
 		return ""
 	}
-	if text[identifierStart-1] != ':' {
+	prev := previousNonSpaceByteIndex(text, identifierStart-1)
+	if prev < 0 || text[prev] != ':' {
 		return ""
 	}
 
 	// Find the word ending at the ':' before the identifier.
-	colonIdx := identifierStart - 1
+	colonIdx := prev
 	wordEnd := colonIdx
 	wordStart := wordEnd
 	for wordStart > 0 && isIdentifierByte(text[wordStart-1]) {
@@ -305,10 +305,13 @@ func probeTypeBeforeIdentifier(text string, identifierStart int) string {
 
 	// word may be a category segment (e.g. "kmem" in "tracepoint:kmem:kmalloc").
 	// Look one level further back.
-	if wordStart <= 0 || text[wordStart-1] != ':' {
+	if wordStart <= 0 {
 		return ""
 	}
-	colonIdx2 := wordStart - 1
+	colonIdx2 := previousNonSpaceByteIndex(text, wordStart-1)
+	if colonIdx2 < 0 || text[colonIdx2] != ':' {
+		return ""
+	}
 	wordEnd2 := colonIdx2
 	wordStart2 := wordEnd2
 	for wordStart2 > 0 && isIdentifierByte(text[wordStart2-1]) {
