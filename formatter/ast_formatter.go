@@ -20,6 +20,9 @@ type ASTFormatter struct {
 	lineLength     int
 	pendingSpace   bool
 
+	// Reuse visitor and parser objects to reduce allocations
+	visitor *ASTVisitor
+
 	// Cached indentation strings to avoid repeated loops and allocations
 	indentCache []string
 }
@@ -59,6 +62,7 @@ func NewASTFormatter(cfg *config.Config) *ASTFormatter {
 		pendingSpace:   false,
 	}
 	f.prepareIndentCache()
+	f.visitor = NewASTVisitor(f)
 	return f
 }
 
@@ -100,10 +104,14 @@ func (f *ASTFormatter) FormatTree(tree antlr.Tree) string {
 	f.lineLength = 0
 	f.pendingSpace = false
 
-	visitor := NewASTVisitor(f)
-	visitor.Visit(tree)
+	// Reuse visitor by resetting its state
+	f.visitor.lastProbe = false
+	f.visitor.suppressNextProbeSpacing = false
+	f.visitor.Visit(tree)
 
-	return strings.TrimRightFunc(f.output.String(), unicode.IsSpace)
+	res := f.output.String()
+	res = strings.TrimRight(res, " \t\n\v\f\r")
+	return res
 }
 
 // ParseBpftrace parses a bpftrace script and returns the AST.
