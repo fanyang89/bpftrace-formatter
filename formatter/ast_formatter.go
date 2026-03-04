@@ -19,6 +19,9 @@ type ASTFormatter struct {
 	needIndent     bool
 	lineLength     int
 	pendingSpace   bool
+
+	// Cached indentation strings to avoid repeated loops and allocations
+	indentCache []string
 }
 
 type syntaxErrorListener struct {
@@ -47,13 +50,34 @@ func (l *syntaxErrorListener) Err() error {
 
 // NewASTFormatter creates a new AST-based formatter
 func NewASTFormatter(cfg *config.Config) *ASTFormatter {
-	return &ASTFormatter{
+	f := &ASTFormatter{
 		config:         cfg,
 		indentLevel:    0,
 		lastWasNewline: true,
 		needIndent:     false,
 		lineLength:     0,
 		pendingSpace:   false,
+	}
+	f.prepareIndentCache()
+	return f
+}
+
+const maxIndentCache = 32
+
+// prepareIndentCache pre-calculates indentation strings for common levels
+func (f *ASTFormatter) prepareIndentCache() {
+	if f.indentCache != nil {
+		return
+	}
+
+	f.indentCache = make([]string, maxIndentCache)
+	indentChar := "\t"
+	if f.config.Indent.UseSpaces {
+		indentChar = strings.Repeat(" ", f.config.Indent.Size)
+	}
+
+	for i := 0; i < maxIndentCache; i++ {
+		f.indentCache[i] = strings.Repeat(indentChar, i)
 	}
 }
 
@@ -181,6 +205,17 @@ func (f *ASTFormatter) writeIndentLevel(level int) {
 		level = 0
 	}
 
+	// Use cached indentation if available
+	if level < len(f.indentCache) {
+		indentStr := f.indentCache[level]
+		f.output.WriteString(indentStr)
+		f.lineLength += len(indentStr)
+		f.lastWasNewline = false
+		f.needIndent = false
+		return
+	}
+
+	// Fallback for extremely deep nesting
 	count := level
 	indentChar := byte('\t')
 	if f.config.Indent.UseSpaces {
