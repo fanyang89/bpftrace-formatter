@@ -353,10 +353,11 @@ func TestASTFormatter_IfElseBraceStyleNextLine(t *testing.T) {
 		"    if (1)\n" +
 		"    {\n" +
 		"        exit();\n" +
-		"    } else\n" +
+		"    }\n" +
+		"    else\n" +
 		"    {\n" +
 		"        exit();\n" +
-		"    };\n" +
+		"    }\n" +
 		"}"
 
 	if got != want {
@@ -462,7 +463,7 @@ func TestASTFormatter_AfterKeywordsSpacing(t *testing.T) {
 				"    if (1)\n" +
 				"    {\n" +
 				"        exit();\n" +
-				"    };\n" +
+				"    }\n" +
 				"}",
 		},
 		{
@@ -473,7 +474,7 @@ func TestASTFormatter_AfterKeywordsSpacing(t *testing.T) {
 				"    if(1)\n" +
 				"    {\n" +
 				"        exit();\n" +
-				"    };\n" +
+				"    }\n" +
 				"}",
 		},
 	}
