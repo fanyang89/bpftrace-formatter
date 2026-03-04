@@ -360,7 +360,11 @@ func (v *ASTVisitor) visitProbeList(ctx *parser.Probe_listContext) {
 		v.Visit(probe)
 		if i < len(probes)-1 {
 			v.formatter.writeString(",")
-			v.formatter.writeNewline()
+			if v.formatter.config.Probes.NewlineBetweenSpecifiers {
+				v.formatter.writeNewline()
+			} else {
+				v.formatter.writeSpace()
+			}
 		}
 	}
 }
@@ -386,9 +390,15 @@ func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
 	} else {
 		v.formatter.writeNewline()
 	}
-	v.formatter.writeString("/ ")
-	v.Visit(ctx.Expression())
-	v.formatter.writeString(" /")
+	if v.formatter.config.Spacing.InsidePredicates {
+		v.formatter.writeString("/ ")
+		v.Visit(ctx.Expression())
+		v.formatter.writeString(" /")
+	} else {
+		v.formatter.writeString("/")
+		v.Visit(ctx.Expression())
+		v.formatter.writeString("/")
+	}
 }
 
 // visitBlock visits a block
@@ -402,14 +412,18 @@ func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 			if v.formatter.config.Comments.PreserveInline {
 				if comment, index := nextInlineBlockComment(ctx, i+1); comment != nil && v.isInlineCommentAfter(node, comment) {
 					v.Visit(node)
-					v.formatter.writeSemicolon()
+					if !v.endsWithBlock(node) {
+						v.formatter.writeSemicolon()
+					}
 					v.Visit(comment)
 					i = index
 					continue
 				}
 			}
 			v.Visit(node)
-			v.formatter.writeSemicolon()
+			if !v.endsWithBlock(node) {
+				v.formatter.writeSemicolon()
+			}
 			v.formatter.writeNewline()
 		case *parser.CommentContext:
 			v.Visit(node)
@@ -505,14 +519,23 @@ func (v *ASTVisitor) visitIfStatement(ctx *parser.If_statementContext) {
 	v.Visit(ctx.AllBlock()[0])
 
 	if len(ctx.AllBlock()) > 1 {
-		v.formatter.writeSpace()
 		if v.formatter.config.Blocks.BraceStyle == "same_line" {
+			v.formatter.writeSpace()
 			v.formatter.writeKeyword("else")
 		} else {
+			v.formatter.ensureNewline()
+			v.formatter.writeIndent()
 			v.formatter.writeString("else")
 		}
 		v.Visit(ctx.AllBlock()[1])
 	}
+}
+
+func (v *ASTVisitor) endsWithBlock(ctx *parser.StatementContext) bool {
+	if ctx.If_statement() != nil || ctx.While_statement() != nil || ctx.For_statement() != nil {
+		return true
+	}
+	return false
 }
 
 // visitWhileStatement visits a while statement
@@ -710,6 +733,24 @@ func (v *ASTVisitor) visitTupleExpression(ctx *parser.Tuple_expressionContext) {
 // visitComment visits a comment
 func (v *ASTVisitor) visitComment(ctx *parser.CommentContext) {
 	commentText := ctx.GetText()
+
+	// Ensure space after // or # if followed by non-space
+	if len(commentText) >= 2 {
+		prefix := ""
+		if commentText[0:2] == "//" {
+			prefix = "//"
+		} else if commentText[0:1] == "#" && commentText[0:2] != "#!" {
+			prefix = "#"
+		}
+
+		if prefix != "" {
+			content := commentText[len(prefix):]
+			if len(content) > 0 && content[0] != ' ' && content[0] != '\t' {
+				commentText = prefix + " " + content
+			}
+		}
+	}
+
 	inline := v.formatter.config.Comments.PreserveInline && !v.formatter.lastWasNewline
 	if inline {
 		v.formatter.writeSpaceNoWrap()

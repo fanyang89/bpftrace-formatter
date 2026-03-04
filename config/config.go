@@ -39,6 +39,7 @@ type SpacingConfig struct {
 	AroundCommas      bool `json:"around_commas"`      // Space after commas
 	AroundParentheses bool `json:"around_parentheses"` // Space inside parentheses
 	AroundBrackets    bool `json:"around_brackets"`    // Space inside brackets
+	InsidePredicates  bool `json:"inside_predicates"`  // Space inside / /
 	BeforeBlockStart  bool `json:"before_block_start"` // Space before {
 	AfterKeywords     bool `json:"after_keywords"`     // Space after if, while, etc.
 }
@@ -59,7 +60,8 @@ type CommentConfig struct {
 
 // ProbeConfig controls probe formatting
 type ProbeConfig struct {
-	AlignPredicates bool `json:"align_predicates"` // Align predicates with probe definitions
+	AlignPredicates          bool `json:"align_predicates"`            // Align predicates with probe definitions
+	NewlineBetweenSpecifiers bool `json:"newline_between_specifiers"` // Newline between comma-separated probe specifiers
 }
 
 // BlockConfig controls block formatting
@@ -80,6 +82,7 @@ func DefaultConfig() *Config {
 			AroundCommas:      true,
 			AroundParentheses: false,
 			AroundBrackets:    false,
+			InsidePredicates:  true,
 			BeforeBlockStart:  true,
 			AfterKeywords:     true,
 		},
@@ -94,7 +97,8 @@ func DefaultConfig() *Config {
 			IndentLevel:    0,
 		},
 		Probes: ProbeConfig{
-			AlignPredicates: false,
+			AlignPredicates:          false,
+			NewlineBetweenSpecifiers: true,
 		},
 		Blocks: BlockConfig{
 			BraceStyle:       "next_line",
