@@ -1,8 +1,6 @@
 package formatter
 
 import (
-	"slices"
-
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/fanyang89/bpftrace-formatter/parser"
 )
@@ -1000,6 +998,10 @@ func (v *ASTVisitor) visitPointer(ctx *parser.PointerContext) {
 
 // isAssignmentOperator checks if a string is an assignment operator
 func (v *ASTVisitor) isAssignmentOperator(text string) bool {
-	operators := []string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
-	return slices.Contains(operators, text)
+	switch text {
+	case "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=":
+		return true
+	default:
+		return false
+	}
 }

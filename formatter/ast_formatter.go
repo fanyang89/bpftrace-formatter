@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"unicode"
@@ -13,7 +14,7 @@ import (
 // ASTFormatter formats bpftrace scripts using ANTLR AST
 type ASTFormatter struct {
 	config         *config.Config
-	output         strings.Builder
+	output         bytes.Buffer
 	indentLevel    int
 	lastWasNewline bool
 	needIndent     bool
@@ -22,6 +23,9 @@ type ASTFormatter struct {
 
 	// Cached indentation strings to avoid repeated loops and allocations
 	indentCache []string
+
+	// Reusable visitor instance
+	visitor *ASTVisitor
 }
 
 type syntaxErrorListener struct {
@@ -59,6 +63,7 @@ func NewASTFormatter(cfg *config.Config) *ASTFormatter {
 		pendingSpace:   false,
 	}
 	f.prepareIndentCache()
+	f.visitor = NewASTVisitor(f)
 	return f
 }
 
@@ -100,10 +105,16 @@ func (f *ASTFormatter) FormatTree(tree antlr.Tree) string {
 	f.lineLength = 0
 	f.pendingSpace = false
 
-	visitor := NewASTVisitor(f)
-	visitor.Visit(tree)
+	// Reset visitor state for reuse
+	f.visitor.lastProbe = false
+	f.visitor.suppressNextProbeSpacing = false
 
-	return strings.TrimRightFunc(f.output.String(), unicode.IsSpace)
+	f.visitor.Visit(tree)
+
+	// Optimization: bytes.TrimRight with an explicit character set is faster than
+	// strings.TrimRightFunc with unicode.IsSpace as it avoids function call overhead
+	// and additional string allocations.
+	return string(bytes.TrimRight(f.output.Bytes(), " \t\n\v\f\r"))
 }
 
 // ParseBpftrace parses a bpftrace script and returns the AST.
