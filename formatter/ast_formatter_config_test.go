@@ -353,10 +353,11 @@ func TestASTFormatter_IfElseBraceStyleNextLine(t *testing.T) {
 		"    if (1)\n" +
 		"    {\n" +
 		"        exit();\n" +
-		"    } else\n" +
+		"    }\n" +
+		"    else\n" +
 		"    {\n" +
 		"        exit();\n" +
-		"    };\n" +
+		"    }\n" +
 		"}"
 
 	if got != want {
@@ -395,6 +396,92 @@ func TestASTFormatter_IndentSize(t *testing.T) {
 			cfg.Indent.UseSpaces = true
 
 			input := "BEGIN{exit();}"
+			got, err := NewASTFormatter(cfg).Format(input)
+			if err != nil {
+				t.Fatalf("Format returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASTFormatter_InsidePredicatesSpacing(t *testing.T) {
+	tests := []struct {
+		name             string
+		insidePredicates bool
+		want             string
+	}{
+		{
+			name:             "space inside predicates enabled",
+			insidePredicates: true,
+			want: "tracepoint:syscalls:sys_enter_openat / pid == 1234 /\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+		{
+			name:             "space inside predicates disabled",
+			insidePredicates: false,
+			want: "tracepoint:syscalls:sys_enter_openat /pid == 1234/\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Probes.AlignPredicates = true
+			cfg.Spacing.InsidePredicates = tt.insidePredicates
+
+			input := "tracepoint:syscalls:sys_enter_openat/pid==1234/{exit();}"
+			got, err := NewASTFormatter(cfg).Format(input)
+			if err != nil {
+				t.Fatalf("Format returned error: %v", err)
+			}
+
+			if got != tt.want {
+				t.Fatalf("unexpected output\n--- got ---\n%s\n--- want ---\n%s\n", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASTFormatter_NewlineBetweenSpecifiers(t *testing.T) {
+	tests := []struct {
+		name                     string
+		newlineBetweenSpecifiers bool
+		want                     string
+	}{
+		{
+			name:                     "newline between specifiers enabled",
+			newlineBetweenSpecifiers: true,
+			want: "kprobe:v1,\n" +
+				"kprobe:v2\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+		{
+			name:                     "newline between specifiers disabled",
+			newlineBetweenSpecifiers: false,
+			want: "kprobe:v1, kprobe:v2\n" +
+				"{\n" +
+				"    exit();\n" +
+				"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Probes.NewlineBetweenSpecifiers = tt.newlineBetweenSpecifiers
+
+			input := "kprobe:v1,kprobe:v2{exit();}"
 			got, err := NewASTFormatter(cfg).Format(input)
 			if err != nil {
 				t.Fatalf("Format returned error: %v", err)
@@ -462,7 +549,7 @@ func TestASTFormatter_AfterKeywordsSpacing(t *testing.T) {
 				"    if (1)\n" +
 				"    {\n" +
 				"        exit();\n" +
-				"    };\n" +
+				"    }\n" +
 				"}",
 		},
 		{
@@ -473,7 +560,7 @@ func TestASTFormatter_AfterKeywordsSpacing(t *testing.T) {
 				"    if(1)\n" +
 				"    {\n" +
 				"        exit();\n" +
-				"    };\n" +
+				"    }\n" +
 				"}",
 		},
 	}
