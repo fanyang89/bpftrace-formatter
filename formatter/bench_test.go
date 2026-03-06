@@ -50,3 +50,16 @@ func BenchmarkFormat(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkFormatTree(b *testing.B) {
+	cfg := config.DefaultConfig()
+	tree, err := ParseBpftrace(benchInput)
+	if err != nil {
+		b.Fatal(err)
+	}
+	f := NewASTFormatter(cfg)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = f.FormatTree(tree)
+	}
+}
