@@ -41,6 +41,7 @@ type SpacingConfig struct {
 	AroundBrackets    bool `json:"around_brackets"`    // Space inside brackets
 	BeforeBlockStart  bool `json:"before_block_start"` // Space before {
 	AfterKeywords     bool `json:"after_keywords"`     // Space after if, while, etc.
+	InsidePredicates  bool `json:"inside_predicates"`  // Space inside / /
 }
 
 // LineBreakConfig controls line break behavior
@@ -59,7 +60,8 @@ type CommentConfig struct {
 
 // ProbeConfig controls probe formatting
 type ProbeConfig struct {
-	AlignPredicates bool `json:"align_predicates"` // Align predicates with probe definitions
+	AlignPredicates          bool `json:"align_predicates"`            // Align predicates with probe definitions
+	NewlineBetweenSpecifiers bool `json:"newline_between_specifiers"` // Line break between probe specifiers
 }
 
 // BlockConfig controls block formatting
@@ -82,6 +84,7 @@ func DefaultConfig() *Config {
 			AroundBrackets:    false,
 			BeforeBlockStart:  true,
 			AfterKeywords:     true,
+			InsidePredicates:  true,
 		},
 		LineBreaks: LineBreakConfig{
 			MaxLineLength:           80,
@@ -94,7 +97,8 @@ func DefaultConfig() *Config {
 			IndentLevel:    0,
 		},
 		Probes: ProbeConfig{
-			AlignPredicates: false,
+			AlignPredicates:          false,
+			NewlineBetweenSpecifiers: false,
 		},
 		Blocks: BlockConfig{
 			BraceStyle:       "next_line",

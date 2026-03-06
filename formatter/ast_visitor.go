@@ -1,8 +1,6 @@
 package formatter
 
 import (
-	"slices"
-
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/fanyang89/bpftrace-formatter/parser"
 )
@@ -22,6 +20,12 @@ func NewASTVisitor(formatter *ASTFormatter) *ASTVisitor {
 		formatter:            formatter,
 		lastProbe:            false,
 	}
+}
+
+// Reset resets the visitor's state
+func (v *ASTVisitor) Reset() {
+	v.lastProbe = false
+	v.suppressNextProbeSpacing = false
 }
 
 // Visit visits a parse tree node
@@ -360,7 +364,11 @@ func (v *ASTVisitor) visitProbeList(ctx *parser.Probe_listContext) {
 		v.Visit(probe)
 		if i < len(probes)-1 {
 			v.formatter.writeString(",")
-			v.formatter.writeNewline()
+			if v.formatter.config.Probes.NewlineBetweenSpecifiers {
+				v.formatter.writeNewline()
+			} else {
+				v.formatter.writeSpace()
+			}
 		}
 	}
 }
@@ -386,9 +394,16 @@ func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
 	} else {
 		v.formatter.writeNewline()
 	}
-	v.formatter.writeString("/ ")
+
+	v.formatter.writeString("/")
+	if v.formatter.config.Spacing.InsidePredicates {
+		v.formatter.writeSpaceNoWrap()
+	}
 	v.Visit(ctx.Expression())
-	v.formatter.writeString(" /")
+	if v.formatter.config.Spacing.InsidePredicates {
+		v.formatter.writeSpaceNoWrap()
+	}
+	v.formatter.writeString("/")
 }
 
 // visitBlock visits a block
@@ -402,14 +417,18 @@ func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 			if v.formatter.config.Comments.PreserveInline {
 				if comment, index := nextInlineBlockComment(ctx, i+1); comment != nil && v.isInlineCommentAfter(node, comment) {
 					v.Visit(node)
-					v.formatter.writeSemicolon()
+					if !v.endsInBlock(node) {
+						v.formatter.writeSemicolon()
+					}
 					v.Visit(comment)
 					i = index
 					continue
 				}
 			}
 			v.Visit(node)
-			v.formatter.writeSemicolon()
+			if !v.endsInBlock(node) {
+				v.formatter.writeSemicolon()
+			}
 			v.formatter.writeNewline()
 		case *parser.CommentContext:
 			v.Visit(node)
@@ -505,10 +524,12 @@ func (v *ASTVisitor) visitIfStatement(ctx *parser.If_statementContext) {
 	v.Visit(ctx.AllBlock()[0])
 
 	if len(ctx.AllBlock()) > 1 {
-		v.formatter.writeSpace()
 		if v.formatter.config.Blocks.BraceStyle == "same_line" {
+			v.formatter.writeSpace()
 			v.formatter.writeKeyword("else")
 		} else {
+			v.formatter.ensureNewline()
+			v.formatter.writeIndent()
 			v.formatter.writeString("else")
 		}
 		v.Visit(ctx.AllBlock()[1])
@@ -710,6 +731,25 @@ func (v *ASTVisitor) visitTupleExpression(ctx *parser.Tuple_expressionContext) {
 // visitComment visits a comment
 func (v *ASTVisitor) visitComment(ctx *parser.CommentContext) {
 	commentText := ctx.GetText()
+	if len(commentText) >= 2 {
+		prefix := commentText[:2]
+		if prefix == "//" || prefix == "# " || (prefix[0] == '#' && prefix[1] != ' ') {
+			content := ""
+			actualPrefix := ""
+			if prefix == "//" {
+				actualPrefix = "//"
+				content = commentText[2:]
+			} else {
+				actualPrefix = "#"
+				content = commentText[1:]
+			}
+
+			if len(content) > 0 && content[0] != ' ' && content[0] != '\t' {
+				commentText = actualPrefix + " " + content
+			}
+		}
+	}
+
 	inline := v.formatter.config.Comments.PreserveInline && !v.formatter.lastWasNewline
 	if inline {
 		v.formatter.writeSpaceNoWrap()
@@ -1000,6 +1040,17 @@ func (v *ASTVisitor) visitPointer(ctx *parser.PointerContext) {
 
 // isAssignmentOperator checks if a string is an assignment operator
 func (v *ASTVisitor) isAssignmentOperator(text string) bool {
-	operators := []string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
-	return slices.Contains(operators, text)
+	switch text {
+	case "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=":
+		return true
+	default:
+		return false
+	}
+}
+
+func (v *ASTVisitor) endsInBlock(ctx *parser.StatementContext) bool {
+	if ctx.If_statement() != nil || ctx.While_statement() != nil || ctx.For_statement() != nil {
+		return true
+	}
+	return false
 }
