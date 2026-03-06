@@ -1,8 +1,6 @@
 package formatter
 
 import (
-	"slices"
-
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/fanyang89/bpftrace-formatter/parser"
 )
@@ -22,6 +20,12 @@ func NewASTVisitor(formatter *ASTFormatter) *ASTVisitor {
 		formatter:            formatter,
 		lastProbe:            false,
 	}
+}
+
+// Reset resets the visitor's state
+func (v *ASTVisitor) Reset() {
+	v.lastProbe = false
+	v.suppressNextProbeSpacing = false
 }
 
 // Visit visits a parse tree node
@@ -140,15 +144,14 @@ func (v *ASTVisitor) Visit(tree antlr.Tree) {
 	case antlr.TerminalNode:
 		// Handle terminal nodes (tokens) - only write non-structural tokens
 		text := t.GetText()
-		if text == "[" {
+		switch text {
+		case "[":
 			v.formatter.writeOpenBracket()
-			return
-		}
-		if text == "]" {
+		case "]":
 			v.formatter.writeCloseBracket()
-			return
-		}
-		if text != "" && text != "<EOF>" && text != "{" && text != "}" && text != ";" && text != "(" && text != ")" && text != "," {
+		case "", "<EOF>", "{", "}", ";", "(", ")", ",":
+			// Skip structural tokens
+		default:
 			v.formatter.writeString(text)
 		}
 	default:
@@ -1000,6 +1003,10 @@ func (v *ASTVisitor) visitPointer(ctx *parser.PointerContext) {
 
 // isAssignmentOperator checks if a string is an assignment operator
 func (v *ASTVisitor) isAssignmentOperator(text string) bool {
-	operators := []string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
-	return slices.Contains(operators, text)
+	switch text {
+	case "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=":
+		return true
+	default:
+		return false
+	}
 }
