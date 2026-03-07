@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"unicode"
@@ -13,7 +14,8 @@ import (
 // ASTFormatter formats bpftrace scripts using ANTLR AST
 type ASTFormatter struct {
 	config         *config.Config
-	output         strings.Builder
+	output         bytes.Buffer
+	visitor        *ASTVisitor
 	indentLevel    int
 	lastWasNewline bool
 	needIndent     bool
@@ -58,6 +60,7 @@ func NewASTFormatter(cfg *config.Config) *ASTFormatter {
 		lineLength:     0,
 		pendingSpace:   false,
 	}
+	f.visitor = NewASTVisitor(f)
 	f.prepareIndentCache()
 	return f
 }
@@ -100,10 +103,10 @@ func (f *ASTFormatter) FormatTree(tree antlr.Tree) string {
 	f.lineLength = 0
 	f.pendingSpace = false
 
-	visitor := NewASTVisitor(f)
-	visitor.Visit(tree)
+	f.visitor.Reset()
+	f.visitor.Visit(tree)
 
-	return strings.TrimRightFunc(f.output.String(), unicode.IsSpace)
+	return string(bytes.TrimRightFunc(f.output.Bytes(), unicode.IsSpace))
 }
 
 // ParseBpftrace parses a bpftrace script and returns the AST.
@@ -170,7 +173,7 @@ func (f *ASTFormatter) writeString(s string) {
 				f.writeNewline()
 			} else {
 				f.pendingSpace = false
-				f.output.WriteString(" ")
+				f.output.WriteByte(' ')
 				f.lineLength++
 				f.lastWasNewline = false
 				f.needIndent = false
@@ -234,7 +237,7 @@ func (f *ASTFormatter) writeIndentLevel(level int) {
 
 // writeNewline writes a newline character
 func (f *ASTFormatter) writeNewline() {
-	f.output.WriteString("\n")
+	f.output.WriteByte('\n')
 	f.lastWasNewline = true
 	f.needIndent = true
 	f.lineLength = 0
@@ -248,7 +251,7 @@ func (f *ASTFormatter) writeSpace() {
 
 func (f *ASTFormatter) writeSpaceNoWrap() {
 	f.pendingSpace = false
-	f.output.WriteString(" ")
+	f.output.WriteByte(' ')
 	f.lineLength++
 	f.lastWasNewline = false
 }

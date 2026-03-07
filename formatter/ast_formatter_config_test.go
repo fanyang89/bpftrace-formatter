@@ -353,7 +353,8 @@ func TestASTFormatter_IfElseBraceStyleNextLine(t *testing.T) {
 		"    if (1)\n" +
 		"    {\n" +
 		"        exit();\n" +
-		"    } else\n" +
+		"    }\n" +
+		"    else\n" +
 		"    {\n" +
 		"        exit();\n" +
 		"    };\n" +

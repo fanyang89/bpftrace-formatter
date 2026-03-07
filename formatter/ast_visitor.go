@@ -1,7 +1,8 @@
 package formatter
 
 import (
-	"slices"
+	"strings"
+	"unicode"
 
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/fanyang89/bpftrace-formatter/parser"
@@ -22,6 +23,12 @@ func NewASTVisitor(formatter *ASTFormatter) *ASTVisitor {
 		formatter:            formatter,
 		lastProbe:            false,
 	}
+}
+
+// Reset resets the visitor's state
+func (v *ASTVisitor) Reset() {
+	v.lastProbe = false
+	v.suppressNextProbeSpacing = false
 }
 
 // Visit visits a parse tree node
@@ -140,15 +147,14 @@ func (v *ASTVisitor) Visit(tree antlr.Tree) {
 	case antlr.TerminalNode:
 		// Handle terminal nodes (tokens) - only write non-structural tokens
 		text := t.GetText()
-		if text == "[" {
+		switch text {
+		case "[":
 			v.formatter.writeOpenBracket()
-			return
-		}
-		if text == "]" {
+		case "]":
 			v.formatter.writeCloseBracket()
-			return
-		}
-		if text != "" && text != "<EOF>" && text != "{" && text != "}" && text != ";" && text != "(" && text != ")" && text != "," {
+		case "{", "}", ";", "(", ")", ",", "<EOF>", "":
+			// Structural tokens handled elsewhere
+		default:
 			v.formatter.writeString(text)
 		}
 	default:
@@ -360,7 +366,11 @@ func (v *ASTVisitor) visitProbeList(ctx *parser.Probe_listContext) {
 		v.Visit(probe)
 		if i < len(probes)-1 {
 			v.formatter.writeString(",")
-			v.formatter.writeNewline()
+			if v.formatter.config.Probes.NewlineBetweenSpecifiers {
+				v.formatter.writeNewline()
+			} else {
+				v.formatter.writeSpace()
+			}
 		}
 	}
 }
@@ -386,9 +396,16 @@ func (v *ASTVisitor) visitPredicate(ctx *parser.PredicateContext) {
 	} else {
 		v.formatter.writeNewline()
 	}
-	v.formatter.writeString("/ ")
-	v.Visit(ctx.Expression())
-	v.formatter.writeString(" /")
+
+	if v.formatter.config.Spacing.InsidePredicates {
+		v.formatter.writeString("/ ")
+		v.Visit(ctx.Expression())
+		v.formatter.writeString(" /")
+	} else {
+		v.formatter.writeString("/")
+		v.Visit(ctx.Expression())
+		v.formatter.writeString("/")
+	}
 }
 
 // visitBlock visits a block
@@ -505,10 +522,12 @@ func (v *ASTVisitor) visitIfStatement(ctx *parser.If_statementContext) {
 	v.Visit(ctx.AllBlock()[0])
 
 	if len(ctx.AllBlock()) > 1 {
-		v.formatter.writeSpace()
 		if v.formatter.config.Blocks.BraceStyle == "same_line" {
+			v.formatter.writeSpace()
 			v.formatter.writeKeyword("else")
 		} else {
+			v.formatter.ensureNewline()
+			v.formatter.writeIndent()
 			v.formatter.writeString("else")
 		}
 		v.Visit(ctx.AllBlock()[1])
@@ -710,6 +729,21 @@ func (v *ASTVisitor) visitTupleExpression(ctx *parser.Tuple_expressionContext) {
 // visitComment visits a comment
 func (v *ASTVisitor) visitComment(ctx *parser.CommentContext) {
 	commentText := ctx.GetText()
+
+	// Ensure there's a space after // or # if followed by a non-whitespace character
+	if strings.HasPrefix(commentText, "//") {
+		if len(commentText) > 2 && !unicode.IsSpace(rune(commentText[2])) {
+			commentText = "// " + commentText[2:]
+		}
+	} else if strings.HasPrefix(commentText, "#") {
+		// Avoid adding space to shebang
+		if !strings.HasPrefix(commentText, "#!") {
+			if len(commentText) > 1 && !unicode.IsSpace(rune(commentText[1])) {
+				commentText = "# " + commentText[1:]
+			}
+		}
+	}
+
 	inline := v.formatter.config.Comments.PreserveInline && !v.formatter.lastWasNewline
 	if inline {
 		v.formatter.writeSpaceNoWrap()
@@ -1000,6 +1034,10 @@ func (v *ASTVisitor) visitPointer(ctx *parser.PointerContext) {
 
 // isAssignmentOperator checks if a string is an assignment operator
 func (v *ASTVisitor) isAssignmentOperator(text string) bool {
-	operators := []string{"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
-	return slices.Contains(operators, text)
+	switch text {
+	case "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=":
+		return true
+	default:
+		return false
+	}
 }
