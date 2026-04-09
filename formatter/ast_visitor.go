@@ -419,14 +419,18 @@ func (v *ASTVisitor) visitBlock(ctx *parser.BlockContext) {
 			if v.formatter.config.Comments.PreserveInline {
 				if comment, index := nextInlineBlockComment(ctx, i+1); comment != nil && v.isInlineCommentAfter(node, comment) {
 					v.Visit(node)
-					v.formatter.writeSemicolon()
+					if !v.endsWithBlock(node) {
+						v.formatter.writeSemicolon()
+					}
 					v.Visit(comment)
 					i = index
 					continue
 				}
 			}
 			v.Visit(node)
-			v.formatter.writeSemicolon()
+			if !v.endsWithBlock(node) {
+				v.formatter.writeSemicolon()
+			}
 			v.formatter.writeNewline()
 		case *parser.CommentContext:
 			v.Visit(node)
@@ -532,6 +536,15 @@ func (v *ASTVisitor) visitIfStatement(ctx *parser.If_statementContext) {
 		}
 		v.Visit(ctx.AllBlock()[1])
 	}
+}
+
+// endsWithBlock checks if a statement ends with a block (if/while/for)
+// Such statements should not have a trailing semicolon
+func (v *ASTVisitor) endsWithBlock(ctx *parser.StatementContext) bool {
+	if ctx.If_statement() != nil || ctx.While_statement() != nil || ctx.For_statement() != nil {
+		return true
+	}
+	return false
 }
 
 // visitWhileStatement visits a while statement
