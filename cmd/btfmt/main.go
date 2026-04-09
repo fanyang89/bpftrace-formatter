@@ -78,7 +78,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	// Load configuration
-	cfg, err := loadConfig(opts.configFile, opts.verbose, stderr)
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	cfg, err := config.LoadConfigFromWithLogger(cwd, opts.configFile, opts.verbose, stderr)
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
 	}
@@ -139,59 +143,51 @@ func parseFlags(args []string) (*runOptions, error) {
 	return opts, nil
 }
 
-// loadConfig loads configuration from file or defaults
-func loadConfig(configFile string, verbose bool, stderr io.Writer) (*config.Config, error) {
-	cwd, err := os.Getwd()
+// readInputFile reads the content of a file
+func readInputFile(filename string) (string, error) {
+	content, err := os.ReadFile(filename)
 	if err != nil {
-		cwd = ""
+		return "", fmt.Errorf("reading file: %w", err)
 	}
+	return string(content), nil
+}
 
-	if configFile != "" {
-		configPath := configFile
-		if !filepath.IsAbs(configFile) && cwd != "" {
-			configPath = filepath.Join(cwd, configFile)
-		}
-		if _, err := os.Stat(configPath); err != nil {
-			fmt.Fprintf(stderr, "Warning: specified config file %s not found\n", configPath)
-			return config.DefaultConfig(), nil
-		}
-	}
-
-	cfg, err := config.LoadConfigFromWithLogger(cwd, configFile, verbose, stderr)
+// formatContent formats bpftrace script content using the provided configuration
+func formatContent(content string, cfg *config.Config) (string, error) {
+	var f formatter.Formatter = formatter.NewASTFormatter(cfg)
+	formatted, err := f.Format(content)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("formatting: %w", err)
 	}
 
-	return cfg, nil
+	if !strings.HasSuffix(formatted, "\n") {
+		formatted += "\n"
+	}
+	return formatted, nil
 }
 
 // processFile processes a single bpftrace file
 func processFile(filename string, cfg *config.Config, writeToFile bool, verbose bool, stdout, stderr io.Writer) error {
 	// Read input file
-	content, err := os.ReadFile(filename)
+	content, err := readInputFile(filename)
 	if err != nil {
-		return fmt.Errorf("reading file: %w", err)
+		return err
 	}
 
 	if verbose {
 		fmt.Fprintf(stderr, "Processing: %s\n", filename)
 	}
 
-	// Create formatter and format the content
-	astFormatter := formatter.NewASTFormatter(cfg)
-	formatted, err := astFormatter.Format(string(content))
+	// Format the content
+	formatted, err := formatContent(content, cfg)
 	if err != nil {
-		return fmt.Errorf("formatting: %w", err)
-	}
-
-	if !strings.HasSuffix(formatted, "\n") {
-		formatted += "\n"
+		return err
 	}
 
 	// Output result
 	if writeToFile {
 		// Write back to the original file without resetting permissions.
-		if err := writeFilePreserveMode(filename, []byte(formatted)); err != nil {
+		if err := writeFilePreserveMode(filename, []byte(formatted), stderr); err != nil {
 			return fmt.Errorf("writing file: %w", err)
 		}
 		if verbose {
@@ -205,7 +201,73 @@ func processFile(filename string, cfg *config.Config, writeToFile bool, verbose 
 	return nil
 }
 
-func writeFilePreserveMode(filename string, data []byte) error {
+// createTempFile creates a temporary file, writes data to it, and syncs it
+func createTempFile(dir, base string, data []byte, logWriter io.Writer) (string, *os.File, error) {
+	tempFile, err := os.CreateTemp(dir, base+".tmp-*")
+	if err != nil {
+		return "", nil, err
+	}
+	tempName := tempFile.Name()
+
+	n, err := tempFile.Write(data)
+	if err == nil && n < len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		if closeErr := tempFile.Close(); closeErr != nil && logWriter != nil {
+			fmt.Fprintf(logWriter, "Warning: failed to close temp file: %v\n", closeErr)
+		}
+		if removeErr := os.Remove(tempName); removeErr != nil && logWriter != nil {
+			fmt.Fprintf(logWriter, "Warning: failed to remove temp file %s: %v\n", tempName, removeErr)
+		}
+		return "", nil, err
+	}
+
+	if err := tempFile.Sync(); err != nil {
+		if closeErr := tempFile.Close(); closeErr != nil && logWriter != nil {
+			fmt.Fprintf(logWriter, "Warning: failed to close temp file: %v\n", closeErr)
+		}
+		if removeErr := os.Remove(tempName); removeErr != nil && logWriter != nil {
+			fmt.Fprintf(logWriter, "Warning: failed to remove temp file %s: %v\n", tempName, removeErr)
+		}
+		return "", nil, err
+	}
+
+	return tempName, tempFile, nil
+}
+
+// applyFilePermissions copies file permissions from info to the temp file
+func applyFilePermissions(tempFile *os.File, info os.FileInfo) error {
+	mode := info.Mode().Perm() | (info.Mode() & (os.ModeSetuid | os.ModeSetgid | os.ModeSticky))
+	return tempFile.Chmod(mode)
+}
+
+// renameTempFileOverwrite renames tempFile over target file, handling Windows quirks
+func renameTempFileOverwrite(tempName, filename string, logWriter io.Writer) error {
+	err := os.Rename(tempName, filename)
+	if err == nil {
+		return nil
+	}
+
+	// On Windows, rename fails if target exists. Remove it first.
+	if runtime.GOOS == "windows" {
+		var renameErr error
+		if removeErr := os.Remove(filename); removeErr == nil {
+			renameErr = os.Rename(tempName, filename)
+			if renameErr == nil {
+				return nil
+			}
+			err = renameErr
+		}
+	}
+
+	if removeErr := os.Remove(tempName); removeErr != nil && logWriter != nil {
+		fmt.Fprintf(logWriter, "Warning: failed to remove temp file %s: %v\n", tempName, removeErr)
+	}
+	return err
+}
+
+func writeFilePreserveMode(filename string, data []byte, logWriter io.Writer) error {
 	info, err := os.Lstat(filename)
 	if err != nil {
 		return err
@@ -221,54 +283,29 @@ func writeFilePreserveMode(filename string, data []byte) error {
 
 	dir := filepath.Dir(filename)
 	base := filepath.Base(filename)
-	tempFile, err := os.CreateTemp(dir, base+".tmp-*")
+	tempName, tempFile, err := createTempFile(dir, base, data, logWriter)
 	if err != nil {
 		return writeFileTruncate(filename, data)
 	}
-	tempName := tempFile.Name()
 
-	cleanup := func() {
-		_ = tempFile.Close()
-		_ = os.Remove(tempName)
-	}
-
-	n, err := tempFile.Write(data)
-	if err == nil && n < len(data) {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		cleanup()
-		return err
-	}
-
-	if err := tempFile.Sync(); err != nil {
-		cleanup()
-		return err
-	}
-	mode := info.Mode().Perm() | (info.Mode() & (os.ModeSetuid | os.ModeSetgid | os.ModeSticky))
-	if err := tempFile.Chmod(mode); err != nil {
-		cleanup()
-		return err
-	}
-	if err := tempFile.Close(); err != nil {
-		_ = os.Remove(tempName)
-		return err
-	}
-
-	if err := os.Rename(tempName, filename); err != nil {
-		if runtime.GOOS == "windows" {
-			if removeErr := os.Remove(filename); removeErr == nil {
-				if renameErr := os.Rename(tempName, filename); renameErr == nil {
-					return nil
-				} else {
-					err = renameErr
-				}
-			}
+	if err := applyFilePermissions(tempFile, info); err != nil {
+		if closeErr := tempFile.Close(); closeErr != nil && logWriter != nil {
+			fmt.Fprintf(logWriter, "Warning: failed to close temp file: %v\n", closeErr)
 		}
-		_ = os.Remove(tempName)
+		if removeErr := os.Remove(tempName); removeErr != nil && logWriter != nil {
+			fmt.Fprintf(logWriter, "Warning: failed to remove temp file %s: %v\n", tempName, removeErr)
+		}
 		return err
 	}
-	return nil
+
+	if err := tempFile.Close(); err != nil {
+		if removeErr := os.Remove(tempName); removeErr != nil && logWriter != nil {
+			fmt.Fprintf(logWriter, "Warning: failed to remove temp file %s: %v\n", tempName, removeErr)
+		}
+		return err
+	}
+
+	return renameTempFileOverwrite(tempName, filename, logWriter)
 }
 
 func ensureWritable(filename string) error {
