@@ -12,18 +12,28 @@ import (
 )
 
 // ASTFormatter formats bpftrace scripts using ANTLR AST
+//
+// Thread Safety: This type is NOT thread-safe and should not be used concurrently
+// from multiple goroutines. Create a new instance for each concurrent formatting operation.
 type ASTFormatter struct {
-	config         *config.Config
-	output         bytes.Buffer
-	visitor        *ASTVisitor
+	config *config.Config
+	output bytes.Buffer
+	visitor *ASTVisitor
+
+	// Formatting state - reset before each FormatTree call
+	state formatterState
+
+	// Cached indentation strings to avoid repeated loops and allocations
+	indentCache []string
+}
+
+// formatterState encapsulates the mutable state during formatting
+type formatterState struct {
 	indentLevel    int
 	lastWasNewline bool
 	needIndent     bool
 	lineLength     int
 	pendingSpace   bool
-
-	// Cached indentation strings to avoid repeated loops and allocations
-	indentCache []string
 }
 
 type syntaxErrorListener struct {
@@ -53,12 +63,8 @@ func (l *syntaxErrorListener) Err() error {
 // NewASTFormatter creates a new AST-based formatter
 func NewASTFormatter(cfg *config.Config) *ASTFormatter {
 	f := &ASTFormatter{
-		config:         cfg,
-		indentLevel:    0,
-		lastWasNewline: true,
-		needIndent:     false,
-		lineLength:     0,
-		pendingSpace:   false,
+		config:      cfg,
+		indentCache: make([]string, 0, 10),
 	}
 	f.visitor = NewASTVisitor(f)
 	f.prepareIndentCache()
@@ -96,17 +102,30 @@ func (f *ASTFormatter) Format(input string) (string, error) {
 // FormatTree formats a pre-parsed AST. This avoids re-parsing when the tree
 // is already available (e.g. from the LSP document store).
 func (f *ASTFormatter) FormatTree(tree antlr.Tree) string {
-	f.output.Reset()
-	f.indentLevel = 0
-	f.lastWasNewline = true
-	f.needIndent = false
-	f.lineLength = 0
-	f.pendingSpace = false
+	// Initialize visitor with this formatter if not already done
+	if f.visitor.formatter == nil {
+		f.visitor.formatter = f
+	}
 
-	f.visitor.Reset()
+	// Reset all formatting state
+	f.resetState()
+	f.output.Reset()
+
+	// Visit the AST tree
 	f.visitor.Visit(tree)
 
 	return string(bytes.TrimRightFunc(f.output.Bytes(), unicode.IsSpace))
+}
+
+// resetState resets all mutable state to initial values
+func (f *ASTFormatter) resetState() {
+	f.state = formatterState{
+		indentLevel:    0,
+		lastWasNewline: true,
+		needIndent:     false,
+		lineLength:     0,
+		pendingSpace:   false,
+	}
 }
 
 // ParseBpftrace parses a bpftrace script and returns the AST.
@@ -159,51 +178,68 @@ func (f *ASTFormatter) writeString(s string) {
 	}
 
 	isWS := f.isWhitespace(s)
+	f.handlePendingSpace(s, isWS)
+	f.writeWithIndent(s, isWS)
+	f.updateLineTracking(s)
+}
 
-	if f.pendingSpace && !isWS {
-		if f.needIndent {
-			f.pendingSpace = false
-		} else {
-			tokenLen := len(s)
-			if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-				tokenLen = idx
-			}
-			if f.shouldWrap(1 + tokenLen) {
-				f.pendingSpace = false
-				f.writeNewline()
-			} else {
-				f.pendingSpace = false
-				f.output.WriteByte(' ')
-				f.lineLength++
-				f.lastWasNewline = false
-				f.needIndent = false
-			}
-		}
+// handlePendingSpace handles any pending space before writing content
+func (f *ASTFormatter) handlePendingSpace(s string, isWS bool) {
+	if !f.state.pendingSpace || isWS {
+		return
 	}
 
-	if f.needIndent && !isWS {
+	if f.state.needIndent {
+		f.state.pendingSpace = false
+		return
+	}
+
+	tokenLen := len(s)
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		tokenLen = idx
+	}
+
+	if f.shouldWrap(1 + tokenLen) {
+		f.state.pendingSpace = false
+		f.writeNewline()
+	} else {
+		f.state.pendingSpace = false
+		f.output.WriteByte(' ')
+		f.state.lineLength++
+		f.state.lastWasNewline = false
+		f.state.needIndent = false
+	}
+}
+
+// writeWithIndent writes the string with proper indentation if needed
+func (f *ASTFormatter) writeWithIndent(s string, isWS bool) {
+	if f.state.needIndent && !isWS {
 		f.writeIndent()
 	}
 	f.output.WriteString(s)
+}
 
-	if idx := strings.LastIndexByte(s, '\n'); idx >= 0 {
-		f.lineLength = len(s) - idx - 1
-		f.lastWasNewline = idx == len(s)-1
-		f.needIndent = f.lastWasNewline
+// updateLineTracking updates line length and newline state after writing
+func (f *ASTFormatter) updateLineTracking(s string) {
+	idx := strings.LastIndexByte(s, '\n')
+	if idx >= 0 {
+		f.state.lineLength = len(s) - idx - 1
+		f.state.lastWasNewline = idx == len(s)-1
+		f.state.needIndent = f.state.lastWasNewline
 	} else {
-		f.lineLength += len(s)
-		f.lastWasNewline = false
+		f.state.lineLength += len(s)
+		f.state.lastWasNewline = false
 	}
 }
 
 // writeIndent writes the current indentation
 func (f *ASTFormatter) writeIndent() {
-	f.writeIndentLevel(f.indentLevel)
+	f.writeIndentLevel(f.state.indentLevel)
 }
 
 // writeIndentLevel writes indentation for a specific level
 func (f *ASTFormatter) writeIndentLevel(level int) {
-	f.pendingSpace = false
+	f.state.pendingSpace = false
 	if level < 0 {
 		level = 0
 	}
@@ -212,9 +248,9 @@ func (f *ASTFormatter) writeIndentLevel(level int) {
 	if level < len(f.indentCache) {
 		indentStr := f.indentCache[level]
 		f.output.WriteString(indentStr)
-		f.lineLength += len(indentStr)
-		f.lastWasNewline = false
-		f.needIndent = false
+		f.state.lineLength += len(indentStr)
+		f.state.lastWasNewline = false
+		f.state.needIndent = false
 		return
 	}
 
@@ -230,30 +266,30 @@ func (f *ASTFormatter) writeIndentLevel(level int) {
 		f.output.WriteByte(indentChar)
 	}
 
-	f.lineLength += count
-	f.lastWasNewline = false
-	f.needIndent = false
+	f.state.lineLength += count
+	f.state.lastWasNewline = false
+	f.state.needIndent = false
 }
 
 // writeNewline writes a newline character
 func (f *ASTFormatter) writeNewline() {
 	f.output.WriteByte('\n')
-	f.lastWasNewline = true
-	f.needIndent = true
-	f.lineLength = 0
-	f.pendingSpace = false
+	f.state.lastWasNewline = true
+	f.state.needIndent = true
+	f.state.lineLength = 0
+	f.state.pendingSpace = false
 }
 
 // writeSpace writes a space if spacing is enabled
 func (f *ASTFormatter) writeSpace() {
-	f.pendingSpace = true
+	f.state.pendingSpace = true
 }
 
 func (f *ASTFormatter) writeSpaceNoWrap() {
-	f.pendingSpace = false
+	f.state.pendingSpace = false
 	f.output.WriteByte(' ')
-	f.lineLength++
-	f.lastWasNewline = false
+	f.state.lineLength++
+	f.state.lastWasNewline = false
 }
 
 // writeSpaceIf writes a space conditionally
@@ -265,13 +301,13 @@ func (f *ASTFormatter) writeSpaceIf(condition bool) {
 
 // increaseIndent increases the indentation level
 func (f *ASTFormatter) increaseIndent() {
-	f.indentLevel++
+	f.state.indentLevel++
 }
 
 // decreaseIndent decreases the indentation level
 func (f *ASTFormatter) decreaseIndent() {
-	if f.indentLevel > 0 {
-		f.indentLevel--
+	if f.state.indentLevel > 0 {
+		f.state.indentLevel--
 	}
 }
 
@@ -310,7 +346,7 @@ func (f *ASTFormatter) writeEmptyLines(count int) {
 
 // ensureNewline ensures the output ends with a newline
 func (f *ASTFormatter) ensureNewline() {
-	if !f.lastWasNewline {
+	if !f.state.lastWasNewline {
 		f.writeNewline()
 	}
 }
@@ -376,75 +412,102 @@ func (f *ASTFormatter) writeCloseBracket() {
 
 // writeBlockStart writes a block start with appropriate spacing and indentation
 func (f *ASTFormatter) writeBlockStart() {
-	baseIndent := f.indentLevel
-	braceIndent := baseIndent
-	statementIndent := baseIndent
+	baseIndent := f.state.indentLevel
+	braceIndent := f.calculateBraceIndent(baseIndent)
 
+	f.writeBracePrefix()
+	f.writeOpeningBrace(braceIndent)
+
+	statementIndent := f.calculateStatementIndent(baseIndent)
+	f.state.indentLevel = statementIndent
+}
+
+// calculateBraceIndent calculates the indent level for the opening brace
+func (f *ASTFormatter) calculateBraceIndent(baseIndent int) int {
+	if f.config.Blocks.BraceStyle == "gnu" {
+		return baseIndent + 1
+	}
+	return baseIndent
+}
+
+// calculateStatementIndent calculates the indent level for statements inside the block
+func (f *ASTFormatter) calculateStatementIndent(baseIndent int) int {
 	switch f.config.Blocks.BraceStyle {
-	case "next_line":
+	case "gnu":
+		if f.config.Blocks.IndentStatements {
+			return baseIndent + 2
+		}
+		return baseIndent + 1
+	default:
+		if f.config.Blocks.IndentStatements {
+			return baseIndent + 1
+		}
+		return baseIndent
+	}
+}
+
+// writeBracePrefix writes the appropriate content before the opening brace
+func (f *ASTFormatter) writeBracePrefix() {
+	switch f.config.Blocks.BraceStyle {
+	case "next_line", "gnu":
 		f.writeNewline()
 	case "same_line":
 		if f.config.Spacing.BeforeBlockStart {
 			f.writeSpace()
 		}
-	case "gnu":
-		f.writeNewline()
-		braceIndent = baseIndent + 1
-	default: // default to same_line
+	default:
 		if f.config.Spacing.BeforeBlockStart {
 			f.writeSpace()
 		}
 	}
-	if f.config.Blocks.BraceStyle == "gnu" {
-		f.writeIndentLevel(braceIndent)
-		f.writeString("{")
-	} else {
-		f.writeString("{")
-	}
-	f.writeNewline()
+}
 
-	switch f.config.Blocks.BraceStyle {
-	case "gnu":
-		if f.config.Blocks.IndentStatements {
-			statementIndent = baseIndent + 2
-		} else {
-			statementIndent = baseIndent + 1
-		}
-	default:
-		if f.config.Blocks.IndentStatements {
-			statementIndent = baseIndent + 1
-		}
+// writeOpeningBrace writes the opening brace with proper indentation
+func (f *ASTFormatter) writeOpeningBrace(indentLevel int) {
+	if f.config.Blocks.BraceStyle == "gnu" {
+		f.writeIndentLevel(indentLevel)
 	}
-	f.indentLevel = statementIndent
+	f.writeString("{")
+	f.writeNewline()
 }
 
 // writeBlockEnd writes a block end with appropriate indentation
 func (f *ASTFormatter) writeBlockEnd() {
-	indentDelta := 0
-	switch f.config.Blocks.BraceStyle {
-	case "gnu":
-		if f.config.Blocks.IndentStatements {
-			indentDelta = 2
-		} else {
-			indentDelta = 1
-		}
-	default:
-		if f.config.Blocks.IndentStatements {
-			indentDelta = 1
-		}
-	}
-
-	parentIndent := f.indentLevel - indentDelta
+	indentDelta := f.calculateIndentDelta()
+	parentIndent := f.state.indentLevel - indentDelta
 	if parentIndent < 0 {
 		parentIndent = 0
 	}
+
 	braceIndent := parentIndent
 	if f.config.Blocks.BraceStyle == "gnu" {
 		braceIndent = parentIndent + 1
 	}
-	f.indentLevel = parentIndent
+
+	f.state.indentLevel = parentIndent
+	f.writeClosingBrace(braceIndent)
+}
+
+// calculateIndentDelta calculates how much to decrease indent when exiting a block
+func (f *ASTFormatter) calculateIndentDelta() int {
+	switch f.config.Blocks.BraceStyle {
+	case "gnu":
+		if f.config.Blocks.IndentStatements {
+			return 2
+		}
+		return 1
+	default:
+		if f.config.Blocks.IndentStatements {
+			return 1
+		}
+		return 0
+	}
+}
+
+// writeClosingBrace writes the closing brace with proper indentation
+func (f *ASTFormatter) writeClosingBrace(indentLevel int) {
 	f.ensureNewline()
-	f.writeIndentLevel(braceIndent)
+	f.writeIndentLevel(indentLevel)
 	f.writeString("}")
 }
 
@@ -460,8 +523,8 @@ func (f *ASTFormatter) shouldWrap(nextLen int) bool {
 	if f.config.LineBreaks.MaxLineLength <= 0 {
 		return false
 	}
-	if f.lastWasNewline || f.lineLength == 0 {
+	if f.state.lastWasNewline || f.state.lineLength == 0 {
 		return false
 	}
-	return f.lineLength+nextLen > f.config.LineBreaks.MaxLineLength
+	return f.state.lineLength+nextLen > f.config.LineBreaks.MaxLineLength
 }
