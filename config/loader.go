@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ConfigLoader handles loading configuration from various sources
@@ -50,7 +51,7 @@ func (cl *ConfigLoader) LoadConfig() (*Config, error) {
 
 	// Validate configuration
 	if validationErrors := config.Validate(); len(validationErrors) > 0 {
-		return nil, fmt.Errorf("invalid configuration in %s: %v", configPath, validationErrors[0])
+		return nil, fmt.Errorf("invalid configuration in %s:\n%s", configPath, formatValidationErrors(validationErrors))
 	}
 
 	return config, nil
@@ -60,6 +61,23 @@ func (cl *ConfigLoader) LoadConfig() (*Config, error) {
 // If explicitPath is set but missing, defaults are returned without searching.
 func LoadConfigFrom(baseDir, explicitPath string, verbose bool) (*Config, error) {
 	return LoadConfigFromWithLogger(baseDir, explicitPath, verbose, os.Stdout)
+}
+
+// formatValidationErrors formats a slice of validation errors into a single error message
+func formatValidationErrors(validationErrors []error) string {
+	if len(validationErrors) == 0 {
+		return ""
+	}
+	if len(validationErrors) == 1 {
+		return validationErrors[0].Error()
+	}
+
+	var msg strings.Builder
+	msg.WriteString("multiple validation errors:\n")
+	for _, err := range validationErrors {
+		msg.WriteString(fmt.Sprintf("  - %s\n", err.Error()))
+	}
+	return msg.String()
 }
 
 // LoadConfigFromWithLogger loads configuration with optional verbose logging to logWriter.
@@ -82,13 +100,12 @@ func LoadConfigFromWithLogger(baseDir, explicitPath string, verbose bool, logWri
 				return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
 			}
 			if validationErrors := config.Validate(); len(validationErrors) > 0 {
-				return nil, fmt.Errorf("invalid configuration in %s: %v", configPath, validationErrors[0])
+				return nil, fmt.Errorf("invalid configuration in %s:\n%s", configPath, formatValidationErrors(validationErrors))
 			}
 			return config, nil
 		}
-		if verbose {
-			fmt.Fprintf(logWriter, "Warning: specified config file %s not found\n", configPath)
-		}
+		// Always warn when explicitly specified config file is not found
+		fmt.Fprintf(logWriter, "Warning: specified config file %s not found, using defaults\n", configPath)
 		return DefaultConfig(), nil
 	}
 
@@ -102,7 +119,7 @@ func LoadConfigFromWithLogger(baseDir, explicitPath string, verbose bool, logWri
 				return nil, fmt.Errorf("failed to load config from %s: %w", configPath, err)
 			}
 			if validationErrors := config.Validate(); len(validationErrors) > 0 {
-				return nil, fmt.Errorf("invalid configuration in %s: %v", configPath, validationErrors[0])
+				return nil, fmt.Errorf("invalid configuration in %s:\n%s", configPath, formatValidationErrors(validationErrors))
 			}
 			return config, nil
 		}
@@ -120,7 +137,7 @@ func LoadConfigFromWithLogger(baseDir, explicitPath string, verbose bool, logWri
 				return nil, fmt.Errorf("failed to load config from %s: %w", homeConfig, err)
 			}
 			if validationErrors := config.Validate(); len(validationErrors) > 0 {
-				return nil, fmt.Errorf("invalid configuration in %s: %v", homeConfig, validationErrors[0])
+				return nil, fmt.Errorf("invalid configuration in %s:\n%s", homeConfig, formatValidationErrors(validationErrors))
 			}
 			return config, nil
 		}
@@ -143,9 +160,8 @@ func (cl *ConfigLoader) findConfigFile() string {
 		if _, err := os.Stat(cl.configFile); err == nil {
 			return cl.configFile
 		}
-		if cl.verbose {
-			fmt.Printf("Warning: specified config file %s not found\n", cl.configFile)
-		}
+		// Always warn when explicitly specified config file is not found
+		fmt.Printf("Warning: specified config file %s not found\n", cl.configFile)
 		return ""
 	}
 
