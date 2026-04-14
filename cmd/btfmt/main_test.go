@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -97,7 +98,7 @@ func TestWriteFilePreserveMode_Symlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	if err := writeFilePreserveMode(link, []byte("new")); err != nil {
+	if err := writeFilePreserveMode(link, []byte("new"), io.Discard); err != nil {
 		t.Fatalf("writeFilePreserveMode: %v", err)
 	}
 
@@ -134,7 +135,7 @@ func TestWriteFilePreserveMode_HardLink(t *testing.T) {
 		t.Fatalf("hard link: %v", err)
 	}
 
-	if err := writeFilePreserveMode(link, []byte("new")); err != nil {
+	if err := writeFilePreserveMode(link, []byte("new"), io.Discard); err != nil {
 		t.Fatalf("writeFilePreserveMode: %v", err)
 	}
 
@@ -166,7 +167,7 @@ func TestWriteFilePreserveMode_ReadOnlyFile(t *testing.T) {
 		t.Fatalf("write input: %v", err)
 	}
 
-	err := writeFilePreserveMode(path, []byte("new"))
+	err := writeFilePreserveMode(path, []byte("new"), io.Discard)
 	if err == nil {
 		t.Fatal("expected error writing read-only file")
 	}
