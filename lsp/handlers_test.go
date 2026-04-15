@@ -14,34 +14,28 @@ import (
 	"github.com/fanyang89/bpftrace-formatter/formatter"
 )
 
-func setupTestState(t *testing.T) string {
+func setupTestServer(t *testing.T) (*Server, *HandlerContext, string) {
 	t.Helper()
 
-	shutdownRequested.Store(false)
-	configSupported.Store(false)
-	snippetSupported.Store(false)
+	s := NewServer()
+	ctx := &HandlerContext{
+		server: s,
+	}
 
-	initSettingsMu.Lock()
-	initSettings = nil
-	initSettingsMu.Unlock()
-
-	configResolver = NewConfigResolver()
 	// Force default config without searching workspace/home.
-	configResolver.SetSettings(map[string]any{
+	s.configResolver.SetSettings(map[string]any{
 		"btfmt": map[string]any{
 			"configPath": filepath.Join(t.TempDir(), "does-not-exist.json"),
 		},
 	})
 
-	documentStore = NewDocumentStore(configResolver)
-
 	path := filepath.Join(t.TempDir(), "test.bt")
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
-	return u.String()
+	return s, ctx, u.String()
 }
 
 func TestInitialize_ReturnsServerCapabilities(t *testing.T) {
-	setupTestState(t)
+	_, ctx, _ := setupTestServer(t)
 
 	rootURI := protocol.DocumentUri("file:///tmp")
 	params := &protocol.InitializeParams{
@@ -52,7 +46,7 @@ func TestInitialize_ReturnsServerCapabilities(t *testing.T) {
 		},
 	}
 
-	resultAny, err := initialize(nil, params)
+	resultAny, err := ctx.initialize(nil, params)
 	if err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
@@ -115,24 +109,22 @@ func TestClientSupportsCompletionSnippet(t *testing.T) {
 }
 
 func TestApplyWorkspaceConfigurationResult_FallsBackToInitSettings(t *testing.T) {
-	setupTestState(t)
+	_, ctx, _ := setupTestServer(t)
 
-	initSettingsMu.Lock()
-	initSettings = map[string]any{
+	ctx.initSettingsMu.Lock()
+	ctx.initSettings = map[string]any{
 		"btfmt": map[string]any{
 			"indent": map[string]any{"size": 2},
 		},
 	}
-	initSettingsMu.Unlock()
+	ctx.initSettingsMu.Unlock()
 
-	applyWorkspaceConfigurationResult(nil)
+	ctx.applyWorkspaceConfigurationResult(nil)
 
-	configResolver.mu.Lock()
-	defer configResolver.mu.Unlock()
-
-	btfmtSettings, ok := configResolver.settings["btfmt"].(map[string]any)
+	settings := ctx.server.configResolver.GetSettings()
+	btfmtSettings, ok := settings["btfmt"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected btfmt settings, got %#v", configResolver.settings)
+		t.Fatalf("expected btfmt settings, got %#v", settings)
 	}
 	indent, ok := btfmtSettings["indent"].(map[string]any)
 	if !ok {
@@ -144,28 +136,26 @@ func TestApplyWorkspaceConfigurationResult_FallsBackToInitSettings(t *testing.T)
 }
 
 func TestApplyWorkspaceConfigurationResult_PrefersWorkspaceSettings(t *testing.T) {
-	setupTestState(t)
+	_, ctx, _ := setupTestServer(t)
 
-	initSettingsMu.Lock()
-	initSettings = map[string]any{
+	ctx.initSettingsMu.Lock()
+	ctx.initSettings = map[string]any{
 		"btfmt": map[string]any{
 			"indent": map[string]any{"size": 2},
 		},
 	}
-	initSettingsMu.Unlock()
+	ctx.initSettingsMu.Unlock()
 
-	applyWorkspaceConfigurationResult([]any{
+	ctx.applyWorkspaceConfigurationResult([]any{
 		map[string]any{
 			"indent": map[string]any{"size": 6},
 		},
 	})
 
-	configResolver.mu.Lock()
-	defer configResolver.mu.Unlock()
-
-	btfmtSettings, ok := configResolver.settings["btfmt"].(map[string]any)
+	settings := ctx.server.configResolver.GetSettings()
+	btfmtSettings, ok := settings["btfmt"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected btfmt settings, got %#v", configResolver.settings)
+		t.Fatalf("expected btfmt settings, got %#v", settings)
 	}
 	indent, ok := btfmtSettings["indent"].(map[string]any)
 	if !ok {
@@ -177,7 +167,7 @@ func TestApplyWorkspaceConfigurationResult_PrefersWorkspaceSettings(t *testing.T
 }
 
 func TestDidOpen_PopulatesDiagnosticsForInvalidDocument(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	invalid := "kprobe:sys_clone { @x = count( }\n"
 	openParams := &protocol.DidOpenTextDocumentParams{
@@ -189,11 +179,11 @@ func TestDidOpen_PopulatesDiagnosticsForInvalidDocument(t *testing.T) {
 		},
 	}
 
-	if err := didOpen(nil, openParams); err != nil {
+	if err := ctx.didOpen(nil, openParams); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
-	doc, ok := documentStore.Get(uri)
+	doc, ok := ctx.server.documentStore.Get(uri)
 	if !ok || doc == nil {
 		t.Fatalf("expected document in store")
 	}
@@ -203,14 +193,14 @@ func TestDidOpen_PopulatesDiagnosticsForInvalidDocument(t *testing.T) {
 }
 
 func TestDidChangeConfiguration_RefreshesDocumentConfig(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "kprobe:sys_clone { @x = count(); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
-	doc, ok := documentStore.Get(uri)
+	doc, ok := ctx.server.documentStore.Get(uri)
 	if !ok || doc == nil {
 		t.Fatalf("expected document in store")
 	}
@@ -224,11 +214,11 @@ func TestDidChangeConfiguration_RefreshesDocumentConfig(t *testing.T) {
 			"indent":     map[string]any{"size": 2},
 		},
 	}
-	if err := didChangeConfiguration(nil, &protocol.DidChangeConfigurationParams{Settings: settings}); err != nil {
+	if err := ctx.didChangeConfiguration(nil, &protocol.DidChangeConfigurationParams{Settings: settings}); err != nil {
 		t.Fatalf("didChangeConfiguration: %v", err)
 	}
 
-	doc, ok = documentStore.Get(uri)
+	doc, ok = ctx.server.documentStore.Get(uri)
 	if !ok || doc == nil {
 		t.Fatalf("expected document in store")
 	}
@@ -257,8 +247,8 @@ func TestDidChange_UpdatesDocumentTextAndDiagnostics(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			uri := setupTestState(t)
-			if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: valid}}); err != nil {
+			_, ctx, uri := setupTestServer(t)
+			if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: valid}}); err != nil {
 				t.Fatalf("didOpen: %v", err)
 			}
 
@@ -271,11 +261,11 @@ func TestDidChange_UpdatesDocumentTextAndDiagnostics(t *testing.T) {
 					tc.change,
 				},
 			}
-			if err := didChange(nil, params); err != nil {
+			if err := ctx.didChange(nil, params); err != nil {
 				t.Fatalf("didChange: %v", err)
 			}
 
-			doc, ok := documentStore.Get(uri)
+			doc, ok := ctx.server.documentStore.Get(uri)
 			if !ok || doc == nil {
 				t.Fatalf("expected document in store")
 			}
@@ -290,14 +280,14 @@ func TestDidChange_UpdatesDocumentTextAndDiagnostics(t *testing.T) {
 }
 
 func TestDidFormat_MatchesFormatterOutput(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "kprobe:sys_clone{@x[pid]=count();}\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
-	edits, err := didFormat(nil, &protocol.DocumentFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
+	edits, err := ctx.didFormat(nil, &protocol.DocumentFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
 	if err != nil {
 		t.Fatalf("didFormat: %v", err)
 	}
@@ -305,7 +295,7 @@ func TestDidFormat_MatchesFormatterOutput(t *testing.T) {
 		t.Fatalf("didFormat: expected 1 edit, got %d", len(edits))
 	}
 
-	doc, ok := documentStore.Get(uri)
+	doc, ok := ctx.server.documentStore.Get(uri)
 	if !ok || doc == nil {
 		t.Fatalf("expected document in store")
 	}
@@ -322,10 +312,10 @@ func TestDidFormat_MatchesFormatterOutput(t *testing.T) {
 }
 
 func TestDidHover_ReturnsContents(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "kprobe:sys_clone { @x = count(); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -334,7 +324,7 @@ func TestDidHover_ReturnsContents(t *testing.T) {
 		t.Fatalf("expected probe marker in input")
 	}
 
-	hover, err := didHover(nil, &protocol.HoverParams{
+	hover, err := ctx.didHover(nil, &protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
 			Position:     PositionForOffset(input, offset+2),
@@ -353,10 +343,10 @@ func TestDidHover_ReturnsContents(t *testing.T) {
 }
 
 func TestDidDocumentHighlight_ReturnsReadAndWriteHighlights(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -365,7 +355,7 @@ func TestDidDocumentHighlight_ReturnsReadAndWriteHighlights(t *testing.T) {
 		t.Fatalf("failed to locate query variable")
 	}
 
-	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryBase+len("print(")+1)}})
+	highlights, err := ctx.didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryBase+len("print(")+1)}})
 	if err != nil {
 		t.Fatalf("didDocumentHighlight: %v", err)
 	}
@@ -392,10 +382,10 @@ func TestDidDocumentHighlight_ReturnsReadAndWriteHighlights(t *testing.T) {
 }
 
 func TestDidPrepareRename_ReturnsRangeForVariable(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $lat = 1; print($lat); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -404,7 +394,7 @@ func TestDidPrepareRename_ReturnsRangeForVariable(t *testing.T) {
 		t.Fatalf("missing variable in input")
 	}
 
-	prepared, err := didPrepareRename(nil, &protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, offset+1)}})
+	prepared, err := ctx.didPrepareRename(nil, &protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, offset+1)}})
 	if err != nil {
 		t.Fatalf("didPrepareRename: %v", err)
 	}
@@ -419,10 +409,10 @@ func TestDidPrepareRename_ReturnsRangeForVariable(t *testing.T) {
 }
 
 func TestDidPrepareRename_ReturnsNilForUnsupportedToken(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $lat = 1; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -431,7 +421,7 @@ func TestDidPrepareRename_ReturnsNilForUnsupportedToken(t *testing.T) {
 		t.Fatalf("missing BEGIN in input")
 	}
 
-	prepared, err := didPrepareRename(nil, &protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, offset+1)}})
+	prepared, err := ctx.didPrepareRename(nil, &protocol.PrepareRenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, offset+1)}})
 	if err != nil {
 		t.Fatalf("didPrepareRename: %v", err)
 	}
@@ -441,14 +431,14 @@ func TestDidPrepareRename_ReturnsNilForUnsupportedToken(t *testing.T) {
 }
 
 func TestDidDocumentSymbol_ReturnsSymbols(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "kprobe:sys_clone { @x = count(); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
-	resultAny, err := didDocumentSymbol(nil, &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
+	resultAny, err := ctx.didDocumentSymbol(nil, &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
 	if err != nil {
 		t.Fatalf("didDocumentSymbol: %v", err)
 	}
@@ -465,10 +455,10 @@ func TestDidDocumentSymbol_ReturnsSymbols(t *testing.T) {
 }
 
 func TestDidDefinition_ReturnsVariableDefinition(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -479,7 +469,7 @@ func TestDidDefinition_ReturnsVariableDefinition(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	resultAny, err := ctx.didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDefinition: %v", err)
 	}
@@ -500,10 +490,10 @@ func TestDidDefinition_ReturnsVariableDefinition(t *testing.T) {
 }
 
 func TestDidDefinition_ReturnsMapDefinition(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { @req = count(); print(@req); @req = sum(1); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -514,7 +504,7 @@ func TestDidDefinition_ReturnsMapDefinition(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	resultAny, err := ctx.didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDefinition: %v", err)
 	}
@@ -532,10 +522,10 @@ func TestDidDefinition_ReturnsMapDefinition(t *testing.T) {
 }
 
 func TestDidDefinition_PrefersMacroParameterDeclaration(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "macro foo(@m) { @m = count(); print(@m); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -546,7 +536,7 @@ func TestDidDefinition_PrefersMacroParameterDeclaration(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	resultAny, err := ctx.didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDefinition: %v", err)
 	}
@@ -564,10 +554,10 @@ func TestDidDefinition_PrefersMacroParameterDeclaration(t *testing.T) {
 }
 
 func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $x = 1; print($x); }\nEND { $x = 2; print($x); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -581,7 +571,7 @@ func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
 	secondDefOffset += len("END { ")
 	queryOffset := queryBase + len("print(")
 
-	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	resultAny, err := ctx.didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDefinition: %v", err)
 	}
@@ -597,7 +587,7 @@ func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
 		t.Fatalf("didDefinition start = %+v, want %+v", locations[0].Range.Start, PositionForOffset(input, secondDefOffset))
 	}
 
-	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	refs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences: %v", err)
 	}
@@ -612,7 +602,7 @@ func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
 		}
 	}
 
-	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$y"})
+	edit, err := ctx.didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$y"})
 	if err != nil {
 		t.Fatalf("didRename: %v", err)
 	}
@@ -635,10 +625,10 @@ func TestDidNavigation_VariableScopeStaysWithinProbe(t *testing.T) {
 }
 
 func TestDidNavigation_MacroMapParamScopeDoesNotLeakToGlobalMap(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "macro foo(@m) { @m = count(); print(@m); }\nBEGIN { @m = sum(1); print(@m); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -651,7 +641,7 @@ func TestDidNavigation_MacroMapParamScopeDoesNotLeakToGlobalMap(t *testing.T) {
 	globalAssignOffset += len("BEGIN { ")
 	globalQueryOffset := globalQueryBase + len("print(")
 
-	resultAny, err := didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}})
+	resultAny, err := ctx.didDefinition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDefinition: %v", err)
 	}
@@ -667,7 +657,7 @@ func TestDidNavigation_MacroMapParamScopeDoesNotLeakToGlobalMap(t *testing.T) {
 		t.Fatalf("didDefinition start = %+v, want %+v", locations[0].Range.Start, PositionForOffset(input, globalAssignOffset))
 	}
 
-	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	refs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences: %v", err)
 	}
@@ -675,7 +665,7 @@ func TestDidNavigation_MacroMapParamScopeDoesNotLeakToGlobalMap(t *testing.T) {
 		t.Fatalf("didReferences(include=true) = %d, want 2", len(refs))
 	}
 
-	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}, NewName: "@out"})
+	edit, err := ctx.didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, globalQueryOffset+1)}, NewName: "@out"})
 	if err != nil {
 		t.Fatalf("didRename: %v", err)
 	}
@@ -707,10 +697,10 @@ func TestDidNavigation_MacroMapParamScopeDoesNotLeakToGlobalMap(t *testing.T) {
 }
 
 func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -720,7 +710,7 @@ func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	allRefs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences include declaration: %v", err)
 	}
@@ -728,7 +718,7 @@ func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
 		t.Fatalf("didReferences(include=true) = %d, want 3", len(allRefs))
 	}
 
-	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	withoutDecl, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences exclude declaration: %v", err)
 	}
@@ -743,16 +733,16 @@ func TestDidReferences_RespectsIncludeDeclaration(t *testing.T) {
 	wantDefinitionPos := PositionForOffset(input, definitionOffset)
 	for _, ref := range withoutDecl {
 		if ref.Range.Start == wantDefinitionPos {
-			t.Fatalf("references without declaration unexpectedly include definition")
+			t.Fatalf("references(include=false) unexpectedly include definition")
 		}
 	}
 }
 
 func TestDidReferences_NoDefinitionKeepsAllReferences(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { print($lat); print($lat); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -762,7 +752,7 @@ func TestDidReferences_NoDefinitionKeepsAllReferences(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	refs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences: %v", err)
 	}
@@ -772,10 +762,10 @@ func TestDidReferences_NoDefinitionKeepsAllReferences(t *testing.T) {
 }
 
 func TestDidDocumentHighlight_AssignmentDetectionHandlesUnicodePrefix(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { printf(\"你好\"); $lat = 1; print($lat); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -785,7 +775,7 @@ func TestDidDocumentHighlight_AssignmentDetectionHandlesUnicodePrefix(t *testing
 	}
 	queryOffset := len([]rune(input[:queryByteOffset])) + 1
 
-	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset)}})
+	highlights, err := ctx.didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset)}})
 	if err != nil {
 		t.Fatalf("didDocumentHighlight: %v", err)
 	}
@@ -812,10 +802,10 @@ func TestDidDocumentHighlight_AssignmentDetectionHandlesUnicodePrefix(t *testing
 }
 
 func TestDidReferences_MapAssignmentWithStringBracketKeyStillCountsDefinition(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { @m[\"[\"] = 1; print(@m[\"[\"]); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -825,7 +815,7 @@ func TestDidReferences_MapAssignmentWithStringBracketKeyStillCountsDefinition(t 
 	}
 	queryOffset := queryBase + len("print(")
 
-	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	allRefs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences include declaration: %v", err)
 	}
@@ -833,7 +823,7 @@ func TestDidReferences_MapAssignmentWithStringBracketKeyStillCountsDefinition(t 
 		t.Fatalf("didReferences(include=true) = %d, want 2", len(allRefs))
 	}
 
-	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	withoutDecl, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences exclude declaration: %v", err)
 	}
@@ -843,10 +833,10 @@ func TestDidReferences_MapAssignmentWithStringBracketKeyStillCountsDefinition(t 
 }
 
 func TestDidReferences_MacroMapParamHonorsIncludeDeclaration(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "macro foo(@m) { print(@m); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -857,7 +847,7 @@ func TestDidReferences_MacroMapParamHonorsIncludeDeclaration(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	allRefs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences include declaration: %v", err)
 	}
@@ -865,7 +855,7 @@ func TestDidReferences_MacroMapParamHonorsIncludeDeclaration(t *testing.T) {
 		t.Fatalf("didReferences(include=true) = %d, want 2", len(allRefs))
 	}
 
-	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	withoutDecl, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences exclude declaration: %v", err)
 	}
@@ -880,10 +870,10 @@ func TestDidReferences_MacroMapParamHonorsIncludeDeclaration(t *testing.T) {
 }
 
 func TestDidReferences_ForInVariableHonorsIncludeDeclaration(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { @m[1] = 10; for ($i in @m) { print($i); } }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -894,7 +884,7 @@ func TestDidReferences_ForInVariableHonorsIncludeDeclaration(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	allRefs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences include declaration: %v", err)
 	}
@@ -902,7 +892,7 @@ func TestDidReferences_ForInVariableHonorsIncludeDeclaration(t *testing.T) {
 		t.Fatalf("didReferences(include=true) = %d, want 2", len(allRefs))
 	}
 
-	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	withoutDecl, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences exclude declaration: %v", err)
 	}
@@ -917,10 +907,10 @@ func TestDidReferences_ForInVariableHonorsIncludeDeclaration(t *testing.T) {
 }
 
 func TestDidReferences_RangeForVariableHonorsIncludeDeclaration(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { for $i: 0..2 { print($i); } }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -931,7 +921,7 @@ func TestDidReferences_RangeForVariableHonorsIncludeDeclaration(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	allRefs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences include declaration: %v", err)
 	}
@@ -939,7 +929,7 @@ func TestDidReferences_RangeForVariableHonorsIncludeDeclaration(t *testing.T) {
 		t.Fatalf("didReferences(include=true) = %d, want 2", len(allRefs))
 	}
 
-	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	withoutDecl, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences exclude declaration: %v", err)
 	}
@@ -954,10 +944,10 @@ func TestDidReferences_RangeForVariableHonorsIncludeDeclaration(t *testing.T) {
 }
 
 func TestDidReferences_ExcludesAllForInDeclarationsWhenDisabled(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { @a[1] = 1; @b[1] = 1; for ($i in @a) { print($i); } for ($i in @b) { print($i); } }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -969,7 +959,7 @@ func TestDidReferences_ExcludesAllForInDeclarationsWhenDisabled(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	allRefs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	allRefs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil {
 		t.Fatalf("didReferences include declaration: %v", err)
 	}
@@ -977,7 +967,7 @@ func TestDidReferences_ExcludesAllForInDeclarationsWhenDisabled(t *testing.T) {
 		t.Fatalf("didReferences(include=true) = %d, want 4", len(allRefs))
 	}
 
-	withoutDecl, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	withoutDecl, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences exclude declaration: %v", err)
 	}
@@ -995,10 +985,10 @@ func TestDidReferences_ExcludesAllForInDeclarationsWhenDisabled(t *testing.T) {
 }
 
 func TestDidDocumentHighlight_IncrementMutationIsWrite(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $x++; print($x); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1008,7 +998,7 @@ func TestDidDocumentHighlight_IncrementMutationIsWrite(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	highlights, err := ctx.didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDocumentHighlight: %v", err)
 	}
@@ -1036,10 +1026,10 @@ func TestDidDocumentHighlight_IncrementMutationIsWrite(t *testing.T) {
 }
 
 func TestDidDocumentHighlight_MapIncrementMutationIsWrite(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { @m[1]++; print(@m[1]); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1049,7 +1039,7 @@ func TestDidDocumentHighlight_MapIncrementMutationIsWrite(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	highlights, err := ctx.didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDocumentHighlight: %v", err)
 	}
@@ -1077,10 +1067,10 @@ func TestDidDocumentHighlight_MapIncrementMutationIsWrite(t *testing.T) {
 }
 
 func TestDidNavigation_TriplePlusNeighborVariableIsReadOnly(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $a+++$b; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1089,7 +1079,7 @@ func TestDidNavigation_TriplePlusNeighborVariableIsReadOnly(t *testing.T) {
 		t.Fatalf("failed to locate query variable in input")
 	}
 
-	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	refs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences: %v", err)
 	}
@@ -1097,7 +1087,7 @@ func TestDidNavigation_TriplePlusNeighborVariableIsReadOnly(t *testing.T) {
 		t.Fatalf("didReferences(include=false) = %d, want 1", len(refs))
 	}
 
-	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	highlights, err := ctx.didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDocumentHighlight: %v", err)
 	}
@@ -1110,10 +1100,10 @@ func TestDidNavigation_TriplePlusNeighborVariableIsReadOnly(t *testing.T) {
 }
 
 func TestDidNavigation_TripleMinusNeighborVariableIsReadOnly(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $a---$b; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1122,7 +1112,7 @@ func TestDidNavigation_TripleMinusNeighborVariableIsReadOnly(t *testing.T) {
 		t.Fatalf("failed to locate query variable in input")
 	}
 
-	refs, err := didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
+	refs, err := ctx.didReferences(nil, &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, Context: protocol.ReferenceContext{IncludeDeclaration: false}})
 	if err != nil {
 		t.Fatalf("didReferences: %v", err)
 	}
@@ -1130,7 +1120,7 @@ func TestDidNavigation_TripleMinusNeighborVariableIsReadOnly(t *testing.T) {
 		t.Fatalf("didReferences(include=false) = %d, want 1", len(refs))
 	}
 
-	highlights, err := didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
+	highlights, err := ctx.didDocumentHighlight(nil, &protocol.DocumentHighlightParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}})
 	if err != nil {
 		t.Fatalf("didDocumentHighlight: %v", err)
 	}
@@ -1143,10 +1133,10 @@ func TestDidNavigation_TripleMinusNeighborVariableIsReadOnly(t *testing.T) {
 }
 
 func TestDidRename_RenamesVariableAndAcceptsSigilInNewName(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $lat = 1; print($lat); $lat += 2; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1156,7 +1146,7 @@ func TestDidRename_RenamesVariableAndAcceptsSigilInNewName(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$latency"})
+	edit, err := ctx.didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$latency"})
 	if err != nil {
 		t.Fatalf("didRename: %v", err)
 	}
@@ -1179,10 +1169,10 @@ func TestDidRename_RenamesVariableAndAcceptsSigilInNewName(t *testing.T) {
 }
 
 func TestDidRename_RenamesMapAndAcceptsSigilInNewName(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { @req = count(); print(@req); @req = sum(1); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1192,7 +1182,7 @@ func TestDidRename_RenamesMapAndAcceptsSigilInNewName(t *testing.T) {
 	}
 	queryOffset := queryBase + len("print(")
 
-	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "@lat"})
+	edit, err := ctx.didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "@lat"})
 	if err != nil {
 		t.Fatalf("didRename: %v", err)
 	}
@@ -1212,10 +1202,10 @@ func TestDidRename_RenamesMapAndAcceptsSigilInNewName(t *testing.T) {
 }
 
 func TestDidRename_RejectsInvalidNewName(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $lat = 1; print($lat); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1224,7 +1214,7 @@ func TestDidRename_RejectsInvalidNewName(t *testing.T) {
 		t.Fatalf("failed to locate variable in input")
 	}
 
-	edit, err := didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$1bad"})
+	edit, err := ctx.didRename(nil, &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Position: PositionForOffset(input, queryOffset+1)}, NewName: "$1bad"})
 	if err == nil {
 		t.Fatalf("expected rename error for invalid identifier")
 	}
@@ -1234,10 +1224,10 @@ func TestDidRename_RejectsInvalidNewName(t *testing.T) {
 }
 
 func TestDidChange_AppliesIncrementalRangeChange(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "kprobe:sys_clone { @x = count(); }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1259,11 +1249,11 @@ func TestDidChange_AppliesIncrementalRangeChange(t *testing.T) {
 			protocol.TextDocumentContentChangeEvent{Range: &rangeValue, Text: "count("},
 		},
 	}
-	if err := didChange(nil, params); err != nil {
+	if err := ctx.didChange(nil, params); err != nil {
 		t.Fatalf("didChange: %v", err)
 	}
 
-	doc, ok := documentStore.Get(uri)
+	doc, ok := ctx.server.documentStore.Get(uri)
 	if !ok || doc == nil {
 		t.Fatalf("expected document in store")
 	}
@@ -1276,10 +1266,10 @@ func TestDidChange_AppliesIncrementalRangeChange(t *testing.T) {
 }
 
 func TestDidChange_AppliesMultipleChangesInOrder(t *testing.T) {
-	uri := setupTestState(t)
+	_, ctx, uri := setupTestServer(t)
 
 	input := "BEGIN { $x = 1; }\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
@@ -1307,11 +1297,11 @@ func TestDidChange_AppliesMultipleChangesInOrder(t *testing.T) {
 			protocol.TextDocumentContentChangeEvent{Range: &secondRange, Text: "3"},
 		},
 	}
-	if err := didChange(nil, params); err != nil {
+	if err := ctx.didChange(nil, params); err != nil {
 		t.Fatalf("didChange: %v", err)
 	}
 
-	doc, ok := documentStore.Get(uri)
+	doc, ok := ctx.server.documentStore.Get(uri)
 	if !ok || doc == nil {
 		t.Fatalf("expected document in store")
 	}
@@ -1324,13 +1314,6 @@ func TestDidChange_AppliesMultipleChangesInOrder(t *testing.T) {
 }
 
 func TestDidFormat_UsesLatestWorkspaceConfig(t *testing.T) {
-	shutdownRequested.Store(false)
-	configSupported.Store(false)
-
-	initSettingsMu.Lock()
-	initSettings = nil
-	initSettingsMu.Unlock()
-
 	resetFormatTasks()
 	t.Cleanup(resetFormatTasks)
 
@@ -1340,18 +1323,18 @@ func TestDidFormat_UsesLatestWorkspaceConfig(t *testing.T) {
 		t.Fatalf("WriteFile initial config: %v", err)
 	}
 
-	configResolver = NewConfigResolver()
-	configResolver.SetWorkspaceRoots([]string{workspace})
-	documentStore = NewDocumentStore(configResolver)
+	s := NewServer()
+	ctx := &HandlerContext{server: s}
+	s.configResolver.SetWorkspaceRoots([]string{workspace})
 
 	scriptPath := filepath.Join(workspace, "test.bt")
 	uri := (&url.URL{Scheme: "file", Path: filepath.ToSlash(scriptPath)}).String()
 	input := "BEGIN {@x = count();}\n"
-	if err := didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
+	if err := ctx.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), LanguageID: "bpftrace", Version: protocol.Integer(1), Text: input}}); err != nil {
 		t.Fatalf("didOpen: %v", err)
 	}
 
-	edits, err := didFormat(nil, &protocol.DocumentFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
+	edits, err := ctx.didFormat(nil, &protocol.DocumentFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
 	if err != nil {
 		t.Fatalf("didFormat initial: %v", err)
 	}
@@ -1376,7 +1359,7 @@ func TestDidFormat_UsesLatestWorkspaceConfig(t *testing.T) {
 		t.Fatalf("WriteFile updated config: %v", err)
 	}
 
-	edits, err = didFormat(nil, &protocol.DocumentFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
+	edits, err = ctx.didFormat(nil, &protocol.DocumentFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}})
 	if err != nil {
 		t.Fatalf("didFormat updated: %v", err)
 	}

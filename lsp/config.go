@@ -12,17 +12,26 @@ import (
 	"github.com/fanyang89/bpftrace-formatter/config"
 )
 
-type ConfigResolver struct {
+// ConfigProvider defines the interface for resolving configuration for a document.
+type ConfigProvider interface {
+	SetWorkspaceRoots(roots []string)
+	SetSettings(settings map[string]any)
+	GetSettings() map[string]any
+	ResolveForDocument(uri string, docPath string) (*config.Config, error)
+}
+
+type configResolver struct {
 	mu             sync.Mutex
 	workspaceRoots []string
 	settings       map[string]any
 }
 
-func NewConfigResolver() *ConfigResolver {
-	return &ConfigResolver{}
+// NewConfigResolver creates a new ConfigProvider instance.
+func NewConfigResolver() ConfigProvider {
+	return &configResolver{}
 }
 
-func (r *ConfigResolver) SetWorkspaceRoot(root string) {
+func (r *configResolver) SetWorkspaceRoot(root string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if root == "" {
@@ -32,19 +41,25 @@ func (r *ConfigResolver) SetWorkspaceRoot(root string) {
 	}
 }
 
-func (r *ConfigResolver) SetWorkspaceRoots(roots []string) {
+func (r *configResolver) SetWorkspaceRoots(roots []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.workspaceRoots = normalizeWorkspaceRoots(roots)
 }
 
-func (r *ConfigResolver) SetSettings(settings map[string]any) {
+func (r *configResolver) SetSettings(settings map[string]any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.settings = settings
 }
 
-func (r *ConfigResolver) ResolveForDocument(_ string, docPath string) (*config.Config, error) {
+func (r *configResolver) GetSettings() map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.settings
+}
+
+func (r *configResolver) ResolveForDocument(_ string, docPath string) (*config.Config, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

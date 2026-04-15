@@ -22,34 +22,45 @@ type Document struct {
 	Config      *config.Config
 }
 
-type DocumentStore struct {
-	mu       sync.RWMutex
-	docs     map[string]*Document
-	resolver *ConfigResolver
+// DocumentStore defines the interface for managing open documents.
+type DocumentStore interface {
+	Open(uri string, version int32, text string) (*Document, error)
+	Change(uri string, version int32, text string) (*Document, error)
+	Close(uri string)
+	Get(uri string) (*Document, bool)
+	AllDocs() []DocSnapshot
+	RefreshConfigs() error
 }
 
-func NewDocumentStore(resolver *ConfigResolver) *DocumentStore {
-	return &DocumentStore{
+type documentStore struct {
+	mu       sync.RWMutex
+	docs     map[string]*Document
+	resolver ConfigProvider
+}
+
+// NewDocumentStore creates a new DocumentStore instance.
+func NewDocumentStore(resolver ConfigProvider) DocumentStore {
+	return &documentStore{
 		docs:     make(map[string]*Document),
 		resolver: resolver,
 	}
 }
 
-func (s *DocumentStore) Open(uri string, version int32, text string) (*Document, error) {
+func (s *documentStore) Open(uri string, version int32, text string) (*Document, error) {
 	return s.upsert(uri, version, text)
 }
 
-func (s *DocumentStore) Change(uri string, version int32, text string) (*Document, error) {
+func (s *documentStore) Change(uri string, version int32, text string) (*Document, error) {
 	return s.upsert(uri, version, text)
 }
 
-func (s *DocumentStore) Close(uri string) {
+func (s *documentStore) Close(uri string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.docs, uri)
 }
 
-func (s *DocumentStore) Get(uri string) (*Document, bool) {
+func (s *documentStore) Get(uri string) (*Document, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	doc, ok := s.docs[uri]
@@ -64,7 +75,7 @@ type DocSnapshot struct {
 }
 
 // AllDocs returns a snapshot of all open documents.
-func (s *DocumentStore) AllDocs() []DocSnapshot {
+func (s *documentStore) AllDocs() []DocSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -82,7 +93,7 @@ func (s *DocumentStore) AllDocs() []DocSnapshot {
 	return snapshots
 }
 
-func (s *DocumentStore) RefreshConfigs() error {
+func (s *documentStore) RefreshConfigs() error {
 	if s.resolver == nil {
 		return nil
 	}
@@ -117,7 +128,7 @@ func (s *DocumentStore) RefreshConfigs() error {
 	return nil
 }
 
-func (s *DocumentStore) upsert(uri string, version int32, text string) (*Document, error) {
+func (s *documentStore) upsert(uri string, version int32, text string) (*Document, error) {
 	path, err := fileURIToPath(uri)
 	if err != nil {
 		return nil, err

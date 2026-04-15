@@ -139,15 +139,15 @@ func formatWithTimeout(uri string, doc *Document, cfg *config.Config, timeout ti
 	}
 }
 
-func formatDocument(uri string) ([]protocol.TextEdit, error) {
-	doc, ok := documentStore.Get(uri)
+func (ctx *HandlerContext) formatDocument(uri string) ([]protocol.TextEdit, error) {
+	doc, ok := ctx.server.documentStore.Get(uri)
 	if !ok || doc == nil {
 		return []protocol.TextEdit{}, nil
 	}
 
 	cfg := doc.Config
-	if configResolver != nil {
-		resolvedConfig, err := configResolver.ResolveForDocument(doc.URI, doc.Path)
+	if ctx.server.configResolver != nil {
+		resolvedConfig, err := ctx.server.configResolver.ResolveForDocument(doc.URI, doc.Path)
 		if err != nil {
 			return nil, err
 		}

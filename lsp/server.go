@@ -12,15 +12,34 @@ const (
 	serverVersion = "dev"
 )
 
-// RunServer starts the LSP server over stdio.
-func RunServer() {
-	// Log to stderr so VSCode can capture it
-	log.SetOutput(os.Stderr)
-	log.SetFlags(log.Ltime | log.Lmicroseconds)
-	log.Print("[LSP] server starting")
+// Server represents the LSP server and its dependencies.
+type Server struct {
+	documentStore  DocumentStore
+	configResolver ConfigProvider
+	logger         *log.Logger
+}
 
-	handler := newHandler()
+// NewServer creates a new Server instance.
+func NewServer() *Server {
+	s := &Server{
+		logger: log.New(os.Stderr, "[LSP] ", log.Ltime|log.Lmicroseconds),
+	}
+	s.configResolver = NewConfigResolver()
+	s.documentStore = NewDocumentStore(s.configResolver)
+	return s
+}
+
+// Run starts the LSP server over stdio.
+func (s *Server) Run() {
+	s.logger.Print("server starting")
+
+	handler := s.newHandler()
 	srv := server.NewServer(&handler, serverName, false)
-	log.Print("[LSP] handler registered, running stdio")
+	s.logger.Print("handler registered, running stdio")
 	srv.RunStdio()
+}
+
+// RunServer is a convenience wrapper for backward compatibility.
+func RunServer() {
+	NewServer().Run()
 }

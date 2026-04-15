@@ -10,53 +10,57 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
-var (
+// HandlerContext wraps the server and its state for request handling.
+type HandlerContext struct {
+	server            *Server
 	shutdownRequested atomic.Bool
-	configResolver    = NewConfigResolver()
-	documentStore     = NewDocumentStore(configResolver)
 	configSupported   atomic.Bool
 	snippetSupported  atomic.Bool
 	initSettingsMu    sync.Mutex
 	initSettings      map[string]any
-)
+}
 
-func newHandler() protocol.Handler {
+func (s *Server) newHandler() protocol.Handler {
+	ctx := &HandlerContext{
+		server: s,
+	}
+
 	return protocol.Handler{
-		Initialize:                      initialize,
-		Initialized:                     initialized,
-		Shutdown:                        shutdown,
-		Exit:                            exit,
-		WorkspaceDidChangeConfiguration: didChangeConfiguration,
-		TextDocumentDidOpen:             didOpen,
-		TextDocumentDidChange:           didChange,
-		TextDocumentDidClose:            didClose,
-		TextDocumentFormatting:          didFormat,
-		TextDocumentHover:               didHover,
-		TextDocumentDocumentHighlight:   didDocumentHighlight,
-		TextDocumentDocumentSymbol:      didDocumentSymbol,
-		TextDocumentCompletion:          didCompletion,
-		TextDocumentDefinition:          didDefinition,
-		TextDocumentReferences:          didReferences,
-		TextDocumentRename:              didRename,
-		TextDocumentPrepareRename:       didPrepareRename,
+		Initialize:                      ctx.initialize,
+		Initialized:                     ctx.initialized,
+		Shutdown:                        ctx.shutdown,
+		Exit:                            ctx.exit,
+		WorkspaceDidChangeConfiguration: ctx.didChangeConfiguration,
+		TextDocumentDidOpen:             ctx.didOpen,
+		TextDocumentDidChange:           ctx.didChange,
+		TextDocumentDidClose:            ctx.didClose,
+		TextDocumentFormatting:          ctx.didFormat,
+		TextDocumentHover:               ctx.didHover,
+		TextDocumentDocumentHighlight:   ctx.didDocumentHighlight,
+		TextDocumentDocumentSymbol:      ctx.didDocumentSymbol,
+		TextDocumentCompletion:          ctx.didCompletion,
+		TextDocumentDefinition:          ctx.didDefinition,
+		TextDocumentReferences:          ctx.didReferences,
+		TextDocumentRename:              ctx.didRename,
+		TextDocumentPrepareRename:       ctx.didPrepareRename,
 	}
 }
 
-func initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error) {
+func (ctx *HandlerContext) initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error) {
 	if params != nil {
 		if roots := workspaceRootsFromParams(params); len(roots) > 0 {
-			configResolver.SetWorkspaceRoots(roots)
+			ctx.server.configResolver.SetWorkspaceRoots(roots)
 		}
-		snippetSupported.Store(clientSupportsCompletionSnippet(params))
+		ctx.snippetSupported.Store(clientSupportsCompletionSnippet(params))
 		supported := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
-		configSupported.Store(supported)
+		ctx.configSupported.Store(supported)
 
 		if settings := settingsFromParams(params); settings != nil {
-			initSettingsMu.Lock()
-			initSettings = settings
-			initSettingsMu.Unlock()
+			ctx.initSettingsMu.Lock()
+			ctx.initSettings = settings
+			ctx.initSettingsMu.Unlock()
 			if !supported {
-				configResolver.SetSettings(normalizeSettingsMap(settings))
+				ctx.server.configResolver.SetSettings(normalizeSettingsMap(settings))
 			}
 		}
 	}
@@ -84,14 +88,14 @@ func clientSupportsCompletionSnippet(params *protocol.InitializeParams) bool {
 	return *completion.CompletionItem.SnippetSupport
 }
 
-func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
+func (ctx *HandlerContext) initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
 	if context == nil {
 		return nil
 	}
 
-	applyInitSettingsFallback()
+	ctx.applyInitSettingsFallback()
 
-	if configSupported.Load() {
+	if ctx.configSupported.Load() {
 		// Fetch configuration asynchronously to avoid blocking the message loop.
 		// A synchronous call here would deadlock because the response arrives
 		// on the same message loop that is waiting for this handler to return.
@@ -102,7 +106,7 @@ func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
 			}
 			var result []any
 			context.Call(protocol.ServerWorkspaceConfiguration, params, &result)
-			applyWorkspaceConfigurationResult(result)
+			ctx.applyWorkspaceConfigurationResult(result)
 		}()
 		return nil
 	}
@@ -110,36 +114,36 @@ func initialized(context *glsp.Context, _ *protocol.InitializedParams) error {
 	return nil
 }
 
-func applyInitSettingsFallback() {
-	if settings := getInitSettings(); settings != nil {
-		configResolver.SetSettings(normalizeSettingsMap(settings))
+func (ctx *HandlerContext) applyInitSettingsFallback() {
+	if settings := ctx.getInitSettings(); settings != nil {
+		ctx.server.configResolver.SetSettings(normalizeSettingsMap(settings))
 	}
 }
 
-func applyWorkspaceConfigurationResult(result []any) {
+func (ctx *HandlerContext) applyWorkspaceConfigurationResult(result []any) {
 	if settings := settingsFromConfigurationResult(result); settings != nil {
-		configResolver.SetSettings(settings)
+		ctx.server.configResolver.SetSettings(settings)
 		return
 	}
-	applyInitSettingsFallback()
+	ctx.applyInitSettingsFallback()
 }
 
-func didOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
+func (ctx *HandlerContext) didOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
 	if params == nil {
 		return nil
 	}
 
-	doc, err := documentStore.Open(params.TextDocument.URI, params.TextDocument.Version, params.TextDocument.Text)
+	doc, err := ctx.server.documentStore.Open(params.TextDocument.URI, params.TextDocument.Version, params.TextDocument.Text)
 	if err != nil {
 		return err
 	}
 
 	version := protocol.UInteger(params.TextDocument.Version)
-	publishDiagnostics(context, params.TextDocument.URI, &version, doc.Diagnostics)
+	ctx.publishDiagnostics(context, params.TextDocument.URI, &version, doc.Diagnostics)
 	return nil
 }
 
-func didChange(context *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
+func (ctx *HandlerContext) didChange(context *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
 	if params == nil || len(params.ContentChanges) == 0 {
 		return nil
 	}
@@ -147,7 +151,7 @@ func didChange(context *glsp.Context, params *protocol.DidChangeTextDocumentPara
 	uri := string(params.TextDocument.URI)
 	text := ""
 	hasBase := false
-	if existingDoc, ok := documentStore.Get(uri); ok && existingDoc != nil {
+	if existingDoc, ok := ctx.server.documentStore.Get(uri); ok && existingDoc != nil {
 		text = existingDoc.Text
 		hasBase = true
 	}
@@ -157,13 +161,13 @@ func didChange(context *glsp.Context, params *protocol.DidChangeTextDocumentPara
 		return err
 	}
 
-	doc, err := documentStore.Change(params.TextDocument.URI, params.TextDocument.Version, updatedText)
+	doc, err := ctx.server.documentStore.Change(params.TextDocument.URI, params.TextDocument.Version, updatedText)
 	if err != nil {
 		return err
 	}
 
 	version := protocol.UInteger(params.TextDocument.Version)
-	publishDiagnostics(context, params.TextDocument.URI, &version, doc.Diagnostics)
+	ctx.publishDiagnostics(context, params.TextDocument.URI, &version, doc.Diagnostics)
 	return nil
 }
 
@@ -233,17 +237,17 @@ func applyIncrementalChange(text string, changeRange protocol.Range, newText str
 	return text[:start] + newText + text[end:], nil
 }
 
-func didClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
+func (ctx *HandlerContext) didClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	if params == nil {
 		return nil
 	}
 
-	documentStore.Close(params.TextDocument.URI)
-	publishDiagnostics(context, params.TextDocument.URI, nil, []protocol.Diagnostic{})
+	ctx.server.documentStore.Close(params.TextDocument.URI)
+	ctx.publishDiagnostics(context, params.TextDocument.URI, nil, []protocol.Diagnostic{})
 	return nil
 }
 
-func publishDiagnostics(context *glsp.Context, uri string, version *protocol.UInteger, diagnostics []protocol.Diagnostic) {
+func (ctx *HandlerContext) publishDiagnostics(context *glsp.Context, uri string, version *protocol.UInteger, diagnostics []protocol.Diagnostic) {
 	if context == nil {
 		return
 	}
@@ -256,7 +260,7 @@ func publishDiagnostics(context *glsp.Context, uri string, version *protocol.UIn
 	context.Notify(protocol.ServerTextDocumentPublishDiagnostics, params)
 }
 
-func didChangeConfiguration(context *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
+func (ctx *HandlerContext) didChangeConfiguration(context *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
 	if params == nil {
 		return nil
 	}
@@ -266,31 +270,31 @@ func didChangeConfiguration(context *glsp.Context, params *protocol.DidChangeCon
 		return nil
 	}
 
-	configResolver.SetSettings(normalizeSettingsMap(settings))
-	if err := documentStore.RefreshConfigs(); err != nil {
+	ctx.server.configResolver.SetSettings(normalizeSettingsMap(settings))
+	if err := ctx.server.documentStore.RefreshConfigs(); err != nil {
 		return err
 	}
 
-	for _, snap := range documentStore.AllDocs() {
+	for _, snap := range ctx.server.documentStore.AllDocs() {
 		version := protocol.UInteger(snap.Version)
-		publishDiagnostics(context, snap.URI, &version, snap.Diagnostics)
+		ctx.publishDiagnostics(context, snap.URI, &version, snap.Diagnostics)
 	}
 	return nil
 }
 
-func didFormat(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+func (ctx *HandlerContext) didFormat(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
 	if params == nil {
 		return []protocol.TextEdit{}, nil
 	}
-	return formatDocument(params.TextDocument.URI)
+	return ctx.formatDocument(params.TextDocument.URI)
 }
 
-func didHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+func (ctx *HandlerContext) didHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	if params == nil {
 		return nil, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
 		return nil, nil
 	}
@@ -298,12 +302,12 @@ func didHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, e
 	return HoverForPosition(doc, params.Position), nil
 }
 
-func didDocumentHighlight(_ *glsp.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
+func (ctx *HandlerContext) didDocumentHighlight(_ *glsp.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
 	if params == nil {
 		return []protocol.DocumentHighlight{}, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
 		return []protocol.DocumentHighlight{}, nil
 	}
@@ -311,12 +315,12 @@ func didDocumentHighlight(_ *glsp.Context, params *protocol.DocumentHighlightPar
 	return documentHighlightsForPosition(doc, params.Position), nil
 }
 
-func didDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
+func (ctx *HandlerContext) didDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
 	if params == nil {
 		return []protocol.DocumentSymbol{}, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
 		return []protocol.DocumentSymbol{}, nil
 	}
@@ -324,25 +328,25 @@ func didDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (
 	return DocumentSymbols(doc), nil
 }
 
-func didCompletion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+func (ctx *HandlerContext) didCompletion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
 	if params == nil {
 		return []protocol.CompletionItem{}, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
-		return defaultCompletions(), nil
+		return ctx.defaultCompletions(), nil
 	}
 
-	return CompletionForPosition(doc, params.Position), nil
+	return ctx.CompletionForPosition(doc, params.Position), nil
 }
 
-func didDefinition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+func (ctx *HandlerContext) didDefinition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
 	if params == nil {
 		return []protocol.Location{}, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
 		return []protocol.Location{}, nil
 	}
@@ -355,12 +359,12 @@ func didDefinition(_ *glsp.Context, params *protocol.DefinitionParams) (any, err
 	return []protocol.Location{location}, nil
 }
 
-func didReferences(_ *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+func (ctx *HandlerContext) didReferences(_ *glsp.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
 	if params == nil {
 		return []protocol.Location{}, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
 		return []protocol.Location{}, nil
 	}
@@ -368,12 +372,12 @@ func didReferences(_ *glsp.Context, params *protocol.ReferenceParams) ([]protoco
 	return referencesForPosition(doc, params.Position, params.Context.IncludeDeclaration), nil
 }
 
-func didRename(_ *glsp.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
+func (ctx *HandlerContext) didRename(_ *glsp.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	if params == nil {
 		return nil, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
 		return nil, nil
 	}
@@ -381,12 +385,12 @@ func didRename(_ *glsp.Context, params *protocol.RenameParams) (*protocol.Worksp
 	return renameWorkspaceEditForPosition(doc, params.Position, params.NewName)
 }
 
-func didPrepareRename(_ *glsp.Context, params *protocol.PrepareRenameParams) (any, error) {
+func (ctx *HandlerContext) didPrepareRename(_ *glsp.Context, params *protocol.PrepareRenameParams) (any, error) {
 	if params == nil {
 		return nil, nil
 	}
 
-	doc, ok := documentStore.Get(params.TextDocument.URI)
+	doc, ok := ctx.server.documentStore.Get(params.TextDocument.URI)
 	if !ok || doc == nil {
 		return nil, nil
 	}
@@ -399,19 +403,19 @@ func didPrepareRename(_ *glsp.Context, params *protocol.PrepareRenameParams) (an
 	return *rangeValue, nil
 }
 
-func getInitSettings() map[string]any {
-	initSettingsMu.Lock()
-	defer initSettingsMu.Unlock()
-	return initSettings
+func (ctx *HandlerContext) getInitSettings() map[string]any {
+	ctx.initSettingsMu.Lock()
+	defer ctx.initSettingsMu.Unlock()
+	return ctx.initSettings
 }
 
-func shutdown(_ *glsp.Context) error {
-	shutdownRequested.Store(true)
+func (ctx *HandlerContext) shutdown(_ *glsp.Context) error {
+	ctx.shutdownRequested.Store(true)
 	return nil
 }
 
-func exit(_ *glsp.Context) error {
-	if shutdownRequested.Load() {
+func (ctx *HandlerContext) exit(_ *glsp.Context) error {
+	if ctx.shutdownRequested.Load() {
 		os.Exit(0)
 	}
 	os.Exit(1)

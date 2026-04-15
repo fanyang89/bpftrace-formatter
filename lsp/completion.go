@@ -141,9 +141,9 @@ var keywords = []string{
 }
 
 // CompletionForPosition returns completion items for a document position.
-func CompletionForPosition(doc *Document, pos protocol.Position) []protocol.CompletionItem {
+func (ctx *HandlerContext) CompletionForPosition(doc *Document, pos protocol.Position) []protocol.CompletionItem {
 	if doc == nil {
-		return defaultCompletions()
+		return ctx.defaultCompletions()
 	}
 
 	// Determine context based on cursor position
@@ -159,14 +159,20 @@ func CompletionForPosition(doc *Document, pos protocol.Position) []protocol.Comp
 	case contextVariable:
 		return variableCompletions(doc, context.prefix)
 	case contextFunctionCall:
-		return functionCompletions(context.prefix)
+		return ctx.functionCompletions(context.prefix)
 	case contextMapFunction:
-		return mapFunctionCompletions(context.prefix)
+		return ctx.mapFunctionCompletions(context.prefix)
 	case contextStatement:
-		return statementCompletions(context.prefix)
+		return ctx.statementCompletions(context.prefix)
 	default:
-		return defaultCompletions()
+		return ctx.defaultCompletions()
 	}
+}
+
+// CompletionForPosition is a convenience wrapper for backward compatibility.
+// Note: This now requires a HandlerContext. In reality, it was only called from didCompletion which is now a method.
+func CompletionForPosition(doc *Document, pos protocol.Position) []protocol.CompletionItem {
+	return (&HandlerContext{}).CompletionForPosition(doc, pos)
 }
 
 type completionContextKind int
@@ -208,8 +214,13 @@ func determineCompletionContext(doc *Document, pos protocol.Position) completion
 	currentLine := lines[len(lines)-1]
 	trimmed := strings.TrimLeft(currentLine, " \t")
 
-	// Check if inside a block first to get proper context
-	insideBlock := isInsideBlock(textBefore)
+	// Check if inside a block
+	insideBlock := false
+	if doc.ParseResult != nil && doc.ParseResult.Tree != nil && len(doc.ParseResult.Diagnostics) == 0 {
+		insideBlock = isInsideBlockAST(doc.ParseResult.Tree, offset)
+	} else {
+		insideBlock = isInsideBlock(textBefore)
+	}
 
 	// Check for @ prefix (map) - only if cursor is right after @ or typing map name
 	if prefix, ok := markerPrefixInCode(trimmed, '@'); ok {
@@ -704,6 +715,31 @@ func isInsideBlock(textBefore string) bool {
 	return braceDepth(textBefore) > 0
 }
 
+func isInsideBlockAST(tree antlr.Tree, offset int) bool {
+	var found bool
+	var walk func(node antlr.Tree)
+	walk = func(node antlr.Tree) {
+		if node == nil || found {
+			return
+		}
+
+		if ctx, ok := node.(*parser.BlockContext); ok {
+			start := ctx.GetStart().GetStart()
+			stop := ctx.GetStop().GetStop()
+			if offset > start && offset <= stop {
+				found = true
+				return
+			}
+		}
+
+		for i := 0; i < node.GetChildCount(); i++ {
+			walk(node.GetChild(i))
+		}
+	}
+	walk(tree)
+	return found
+}
+
 func braceDepth(text string) int {
 	depth := 0
 	inString := false
@@ -913,14 +949,14 @@ func constantCompletions(prefix string) []protocol.CompletionItem {
 	return items
 }
 
-func functionCompletions(prefix string) []protocol.CompletionItem {
+func (ctx *HandlerContext) functionCompletions(prefix string) []protocol.CompletionItem {
 	items := make([]protocol.CompletionItem, 0, len(builtinFunctions))
 
 	for _, f := range builtinFunctions {
 		// Only add functions (have parentheses)
 		if strings.Contains(f.detail, "(") {
 			if prefix == "" || strings.HasPrefix(f.name, prefix) {
-				insertText, insertTextFormat := functionInsertText(f.name, f.detail)
+				insertText, insertTextFormat := ctx.functionInsertText(f.name, f.detail)
 				sortText := rankedSortText(30, f.name)
 				filterText := f.name
 				items = append(items, protocol.CompletionItem{
@@ -941,12 +977,12 @@ func functionCompletions(prefix string) []protocol.CompletionItem {
 	return items
 }
 
-func mapFunctionCompletions(prefix string) []protocol.CompletionItem {
+func (ctx *HandlerContext) mapFunctionCompletions(prefix string) []protocol.CompletionItem {
 	items := make([]protocol.CompletionItem, 0, len(mapFunctions))
 
 	for _, f := range mapFunctions {
 		if prefix == "" || strings.HasPrefix(f.name, prefix) {
-			insertText, insertTextFormat := functionInsertText(f.name, f.detail)
+			insertText, insertTextFormat := ctx.functionInsertText(f.name, f.detail)
 			sortText := rankedSortText(40, f.name)
 			filterText := f.name
 			items = append(items, protocol.CompletionItem{
@@ -966,7 +1002,7 @@ func mapFunctionCompletions(prefix string) []protocol.CompletionItem {
 	return items
 }
 
-func statementCompletions(prefix string) []protocol.CompletionItem {
+func (ctx *HandlerContext) statementCompletions(prefix string) []protocol.CompletionItem {
 	items := make([]protocol.CompletionItem, 0, len(keywords)+len(builtinFunctions))
 
 	// Add keywords
@@ -984,10 +1020,10 @@ func statementCompletions(prefix string) []protocol.CompletionItem {
 	}
 
 	// Add functions
-	items = append(items, functionCompletions(prefix)...)
+	items = append(items, ctx.functionCompletions(prefix)...)
 
 	// Add map functions
-	items = append(items, mapFunctionCompletions(prefix)...)
+	items = append(items, ctx.mapFunctionCompletions(prefix)...)
 
 	// Add built-in constants (e.g. pid/tid/uid)
 	items = append(items, constantCompletions(prefix)...)
@@ -996,7 +1032,7 @@ func statementCompletions(prefix string) []protocol.CompletionItem {
 	return items
 }
 
-func defaultCompletions() []protocol.CompletionItem {
+func (ctx *HandlerContext) defaultCompletions() []protocol.CompletionItem {
 	items := make([]protocol.CompletionItem, 0, len(probeTypes)+len(builtinFunctions))
 
 	// Probe types
@@ -1005,7 +1041,7 @@ func defaultCompletions() []protocol.CompletionItem {
 	// Functions
 	for _, f := range builtinFunctions {
 		if strings.Contains(f.detail, "(") {
-			insertText, insertTextFormat := functionInsertText(f.name, f.detail)
+			insertText, insertTextFormat := ctx.functionInsertText(f.name, f.detail)
 			sortText := rankedSortText(30, f.name)
 			filterText := f.name
 			items = append(items, protocol.CompletionItem{
@@ -1115,13 +1151,13 @@ func collectVariableNames(doc *Document) []string {
 	return result
 }
 
-func functionInsertText(name string, detail string) (string, *protocol.InsertTextFormat) {
+func (ctx *HandlerContext) functionInsertText(name string, detail string) (string, *protocol.InsertTextFormat) {
 	openParen := strings.Index(detail, "(")
 	closeParen := strings.LastIndex(detail, ")")
 	if openParen < 0 || closeParen <= openParen {
 		return name, nil
 	}
-	if !snippetSupported.Load() {
+	if !ctx.snippetSupported.Load() {
 		return name + "()", nil
 	}
 

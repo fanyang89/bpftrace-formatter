@@ -36,7 +36,8 @@ func TestProbeTypeCompletions(t *testing.T) {
 }
 
 func TestFunctionCompletions(t *testing.T) {
-	items := functionCompletions("")
+	ctx := &HandlerContext{}
+	items := ctx.functionCompletions("")
 	if len(items) == 0 {
 		t.Error("expected function completions")
 	}
@@ -56,11 +57,10 @@ func TestFunctionCompletions(t *testing.T) {
 }
 
 func TestFunctionCompletions_UseSnippetInsertText(t *testing.T) {
-	previous := snippetSupported.Load()
-	snippetSupported.Store(true)
-	t.Cleanup(func() { snippetSupported.Store(previous) })
+	ctx := &HandlerContext{}
+	ctx.snippetSupported.Store(true)
 
-	items := functionCompletions("printf")
+	items := ctx.functionCompletions("printf")
 	if len(items) == 0 {
 		t.Fatalf("expected printf completion")
 	}
@@ -91,11 +91,10 @@ func TestFunctionCompletions_UseSnippetInsertText(t *testing.T) {
 }
 
 func TestFunctionCompletions_FallsBackToPlainTextWithoutSnippetSupport(t *testing.T) {
-	previous := snippetSupported.Load()
-	snippetSupported.Store(false)
-	t.Cleanup(func() { snippetSupported.Store(previous) })
+	ctx := &HandlerContext{}
+	ctx.snippetSupported.Store(false)
 
-	items := functionCompletions("printf")
+	items := ctx.functionCompletions("printf")
 	if len(items) == 0 {
 		t.Fatalf("expected printf completion")
 	}
@@ -120,7 +119,8 @@ func TestFunctionCompletions_FallsBackToPlainTextWithoutSnippetSupport(t *testin
 }
 
 func TestFunctionCompletionsWithPrefix(t *testing.T) {
-	items := functionCompletions("pr")
+	ctx := &HandlerContext{}
+	items := ctx.functionCompletions("pr")
 	if len(items) == 0 {
 		t.Error("expected filtered function completions")
 	}
@@ -133,7 +133,8 @@ func TestFunctionCompletionsWithPrefix(t *testing.T) {
 }
 
 func TestMapFunctionCompletions(t *testing.T) {
-	items := mapFunctionCompletions("")
+	ctx := &HandlerContext{}
+	items := ctx.mapFunctionCompletions("")
 	if len(items) == 0 {
 		t.Error("expected map function completions")
 	}
@@ -153,7 +154,8 @@ func TestMapFunctionCompletions(t *testing.T) {
 }
 
 func TestStatementCompletions(t *testing.T) {
-	items := statementCompletions("")
+	ctx := &HandlerContext{}
+	items := ctx.statementCompletions("")
 	if len(items) == 0 {
 		t.Error("expected statement completions")
 	}
@@ -188,7 +190,8 @@ func TestVariableCompletionsDoesNotIncludeBuiltinConstants(t *testing.T) {
 }
 
 func TestDefaultCompletions(t *testing.T) {
-	items := defaultCompletions()
+	ctx := &HandlerContext{}
+	items := ctx.defaultCompletions()
 	if len(items) == 0 {
 		t.Error("expected default completions")
 	}
