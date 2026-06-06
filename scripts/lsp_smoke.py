@@ -207,7 +207,9 @@ def main():
             env["XDG_CONFIG_HOME"] = str(td_path)
             env["XDG_DATA_HOME"] = str(td_path)
             env["XDG_CACHE_HOME"] = str(td_path)
-            btfmt_path = str((pathlib.Path.cwd() / "btfmt").resolve())
+            btfmt_path = os.environ.get("BTFMT_PATH") or str(
+                (pathlib.Path.cwd() / "btfmt").resolve()
+            )
 
             # Intentionally unformatted input.
             doc_text_v1 = (
@@ -336,6 +338,83 @@ def main():
                     resp=resp,
                 )
             record(summary, "documentSymbol", t0, count=len(syms))
+
+            rid = lsp.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": {"line": 0, "character": 0},
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(summary, "completion", "completion returned error", resp=resp)
+            completion = resp.get("result")
+            if isinstance(completion, dict):
+                completion_count = len(completion.get("items") or [])
+            elif isinstance(completion, list):
+                completion_count = len(completion)
+            else:
+                completion_count = 0
+            if completion_count == 0:
+                fail(summary, "completion", "expected completion items", resp=resp)
+            record(summary, "completion", t0, count=completion_count)
+
+            position = {"line": 0, "character": 1}
+            for method, step in [
+                ("textDocument/definition", "definition"),
+                ("textDocument/references", "references"),
+                ("textDocument/documentHighlight", "documentHighlight"),
+            ]:
+                request_params = {
+                    "textDocument": {"uri": doc_uri},
+                    "position": position,
+                }
+                if method == "textDocument/references":
+                    request_params["context"] = {"includeDeclaration": True}
+                rid = lsp.request(
+                    method,
+                    request_params,
+                )
+                resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+                if "error" in resp:
+                    fail(summary, step, f"{step} returned error", resp=resp)
+                result = resp.get("result") or []
+                if not isinstance(result, list) or len(result) == 0:
+                    fail(summary, step, f"expected non-empty {step} result", resp=resp)
+                record(summary, step, t0, count=len(result))
+
+            rid = lsp.request(
+                "textDocument/prepareRename",
+                {"textDocument": {"uri": doc_uri}, "position": position},
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(
+                    summary, "prepareRename", "prepareRename returned error", resp=resp
+                )
+            if resp.get("result") is None:
+                fail(
+                    summary, "prepareRename", "expected prepareRename range", resp=resp
+                )
+            record(summary, "prepareRename", t0)
+
+            rid = lsp.request(
+                "textDocument/rename",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": position,
+                    "newName": "renamed",
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(summary, "rename", "rename returned error", resp=resp)
+            changes = (resp.get("result") or {}).get("changes") or {}
+            edits = changes.get(doc_uri) or []
+            if len(edits) == 0:
+                fail(summary, "rename", "expected rename edits", resp=resp)
+            record(summary, "rename", t0, edits=len(edits))
 
             # Trigger diagnostics with invalid syntax.
             doc_text_v2 = 'tracepoint:syscalls:sys_enter_openat { printf("x");\n'

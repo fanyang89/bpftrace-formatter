@@ -211,6 +211,25 @@ pub fn load_for_cwd(explicit_path: Option<&Path>) -> Result<Config> {
     Ok(Config::default())
 }
 
+pub fn load_from_base(base_dir: &Path, explicit_path: Option<&Path>) -> Result<Config> {
+    if let Some(path) = explicit_path {
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            base_dir.join(path)
+        };
+        if path.exists() {
+            return Config::load(&path);
+        }
+        return Ok(Config::default());
+    }
+
+    if let Some(path) = search_upwards(base_dir, ".btfmt.json") {
+        return Config::load(&path);
+    }
+    Ok(Config::default())
+}
+
 pub fn search_upwards(start: &Path, filename: &str) -> Option<PathBuf> {
     let mut current = start.to_path_buf();
     loop {

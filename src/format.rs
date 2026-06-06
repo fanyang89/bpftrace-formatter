@@ -29,7 +29,7 @@ fn format_tokens(tokens: &[Token], config: &Config) -> String {
     let mut writer = Writer::new(config);
     let mut top_level_block_closed = false;
 
-    for token in tokens {
+    for (idx, token) in tokens.iter().enumerate() {
         match token.kind {
             TokenKind::Newline => {}
             TokenKind::Shebang => {
@@ -50,7 +50,15 @@ fn format_tokens(tokens: &[Token], config: &Config) -> String {
                         top_level_block_closed = true;
                     }
                 }
-                ";" => writer.semicolon(),
+                ";" => {
+                    if next_significant_token(tokens, idx + 1)
+                        .is_some_and(|next| matches!(next.kind, TokenKind::Comment))
+                    {
+                        writer.semicolon_inline();
+                    } else {
+                        writer.semicolon();
+                    }
+                }
                 "," => writer.comma(),
                 "(" => writer.open_paren(),
                 ")" => writer.close_paren(),
@@ -71,6 +79,12 @@ fn format_tokens(tokens: &[Token], config: &Config) -> String {
     }
 
     writer.finish()
+}
+
+fn next_significant_token(tokens: &[Token], start: usize) -> Option<&Token> {
+    tokens[start..]
+        .iter()
+        .find(|token| !matches!(token.kind, TokenKind::Newline))
 }
 
 struct Writer<'a> {
@@ -192,14 +206,27 @@ impl<'a> Writer<'a> {
         self.newline();
     }
 
+    fn semicolon_inline(&mut self) {
+        trim_trailing_space(&mut self.out);
+        self.write_raw(";");
+        self.pending_space = true;
+    }
+
     fn open_paren(&mut self) {
         trim_trailing_space(&mut self.out);
         self.write_raw("(");
-        self.pending_space = self.config.spacing.around_parentheses;
+        if self.config.spacing.around_parentheses {
+            self.out.push(' ');
+        }
+        self.pending_space = false;
     }
 
     fn close_paren(&mut self) {
-        trim_trailing_space(&mut self.out);
+        if self.config.spacing.around_parentheses && !self.out.ends_with([' ', '(']) {
+            self.out.push(' ');
+        } else if !self.config.spacing.around_parentheses {
+            trim_trailing_space(&mut self.out);
+        }
         self.write_raw(")");
         self.pending_space = true;
     }
@@ -207,11 +234,18 @@ impl<'a> Writer<'a> {
     fn open_bracket(&mut self) {
         trim_trailing_space(&mut self.out);
         self.write_raw("[");
-        self.pending_space = self.config.spacing.around_brackets;
+        if self.config.spacing.around_brackets {
+            self.out.push(' ');
+        }
+        self.pending_space = false;
     }
 
     fn close_bracket(&mut self) {
-        trim_trailing_space(&mut self.out);
+        if self.config.spacing.around_brackets && !self.out.ends_with([' ', '[']) {
+            self.out.push(' ');
+        } else if !self.config.spacing.around_brackets {
+            trim_trailing_space(&mut self.out);
+        }
         self.write_raw("]");
         self.pending_space = true;
     }
