@@ -63,7 +63,10 @@ class LSPClient:
     def request(self, method: str, params):
         rid = self._next_id
         self._next_id += 1
-        self.send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+        msg = {"jsonrpc": "2.0", "id": rid, "method": method}
+        if params is not None:
+            msg["params"] = params
+        self.send(msg)
         return rid
 
     def notify(self, method: str, params):
@@ -147,7 +150,9 @@ def apply_text_edits(text: str, edits):
             return 0
         if line >= len(lines):
             return sum(len(x) for x in lines)
-        return sum(len(lines[i]) for i in range(line)) + min(character, len(lines[line]))
+        return sum(len(lines[i]) for i in range(line)) + min(
+            character, len(lines[line])
+        )
 
     def edit_key(e):
         r = e.get("range") or {}
@@ -165,6 +170,14 @@ def apply_text_edits(text: str, edits):
         new_text = e.get("newText", "")
         out = out[:start] + new_text + out[end:]
     return out
+
+
+def offset_to_position(text: str, offset: int):
+    # This smoke uses ASCII-only fixtures.
+    before = text[:offset]
+    line = before.count("\n")
+    line_start = before.rfind("\n") + 1
+    return {"line": line, "character": offset - line_start}
 
 
 def fail(summary, step: str, msg: str, **extra):
@@ -196,17 +209,21 @@ def main():
         with tempfile.TemporaryDirectory(prefix="btfmt-lsp-smoke-") as td:
             td_path = pathlib.Path(td)
             doc_path = td_path / "smoke.bt"
+            config_path = td_path / ".btfmt.json"
             env = os.environ.copy()
             # Make smoke deterministic: avoid picking up user/global configs.
             env["HOME"] = str(td_path)
             env["XDG_CONFIG_HOME"] = str(td_path)
             env["XDG_DATA_HOME"] = str(td_path)
             env["XDG_CACHE_HOME"] = str(td_path)
-            btfmt_path = str((pathlib.Path.cwd() / "btfmt").resolve())
+            btfmt_path = os.environ.get("BTFMT_PATH") or str(
+                (pathlib.Path.cwd() / "btfmt").resolve()
+            )
+            config_path.write_text('{"indent":{"size":2}}\n', encoding="utf-8")
 
             # Intentionally unformatted input.
             doc_text_v1 = (
-                'tracepoint:syscalls:sys_enter_openat{printf("openat: %s\\n",str(args.filename));}\n'
+                'tracepoint:syscalls:sys_enter_openat{$target=1;@opens[$target]=count();printf("openat: %s\\n",str(args.filename));}\n'
                 'tracepoint:syscalls:sys_enter_openat2{printf("openat2: %s\\n",str(args->filename));}\n'
             )
             doc_path.write_text(doc_text_v1, encoding="utf-8")
@@ -218,6 +235,7 @@ def main():
                 stderr=subprocess.PIPE,
                 text=True,
                 env=env,
+                cwd=str(td_path),
             )
             if cli.returncode != 0:
                 fail(
@@ -228,7 +246,9 @@ def main():
                     stderr=cli.stderr[-4000:],
                 )
             expected_formatted = cli.stdout
-            record(summary, "cli_format", t0, bytes=len(expected_formatted.encode("utf-8")))
+            record(
+                summary, "cli_format", t0, bytes=len(expected_formatted.encode("utf-8"))
+            )
 
             lsp = LSPClient([btfmt_path, "lsp"], env=env)
             record(summary, "spawn", t0, pid=lsp.p.pid)
@@ -238,6 +258,7 @@ def main():
                 "rootUri": td_path.absolute().as_uri(),
                 "capabilities": {},
                 "clientInfo": {"name": "task-lsp-smoke", "version": "0"},
+                "initializationOptions": {"btfmt": {"configPath": ".btfmt.json"}},
                 "workspaceFolders": [
                     {"uri": td_path.absolute().as_uri(), "name": "btfmt-lsp-smoke"}
                 ],
@@ -276,7 +297,9 @@ def main():
                 fail(summary, "formatting", "formatting returned error", resp=resp)
             edits = resp.get("result")
             if not isinstance(edits, list):
-                fail(summary, "formatting", "formatting result is not a list", resp=resp)
+                fail(
+                    summary, "formatting", "formatting result is not a list", resp=resp
+                )
             lsp_formatted = apply_text_edits(doc_text_v1, edits)
             if lsp_formatted != expected_formatted:
                 fail(
@@ -286,11 +309,20 @@ def main():
                     expected_prefix=expected_formatted[:200],
                     got_prefix=lsp_formatted[:200],
                 )
-            record(summary, "formatting", t0, edits=len(edits), bytes=len(lsp_formatted.encode("utf-8")))
+            record(
+                summary,
+                "formatting",
+                t0,
+                edits=len(edits),
+                bytes=len(lsp_formatted.encode("utf-8")),
+            )
 
             rid = lsp.request(
                 "textDocument/hover",
-                {"textDocument": {"uri": doc_uri}, "position": {"line": 0, "character": 1}},
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": {"line": 0, "character": 1},
+                },
             )
             resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
             if "error" in resp:
@@ -303,11 +335,98 @@ def main():
             )
             resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
             if "error" in resp:
-                fail(summary, "documentSymbol", "documentSymbol returned error", resp=resp)
+                fail(
+                    summary,
+                    "documentSymbol",
+                    "documentSymbol returned error",
+                    resp=resp,
+                )
             syms = resp.get("result")
             if not isinstance(syms, list):
-                fail(summary, "documentSymbol", "documentSymbol result is not a list", resp=resp)
+                fail(
+                    summary,
+                    "documentSymbol",
+                    "documentSymbol result is not a list",
+                    resp=resp,
+                )
             record(summary, "documentSymbol", t0, count=len(syms))
+
+            rid = lsp.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": {"line": 0, "character": 0},
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(summary, "completion", "completion returned error", resp=resp)
+            completion = resp.get("result")
+            if isinstance(completion, dict):
+                completion_count = len(completion.get("items") or [])
+            elif isinstance(completion, list):
+                completion_count = len(completion)
+            else:
+                completion_count = 0
+            if completion_count == 0:
+                fail(summary, "completion", "expected completion items", resp=resp)
+            record(summary, "completion", t0, count=completion_count)
+
+            position = offset_to_position(doc_text_v1, doc_text_v1.index("$target") + 1)
+            for method, step in [
+                ("textDocument/definition", "definition"),
+                ("textDocument/references", "references"),
+                ("textDocument/documentHighlight", "documentHighlight"),
+            ]:
+                request_params = {
+                    "textDocument": {"uri": doc_uri},
+                    "position": position,
+                }
+                if method == "textDocument/references":
+                    request_params["context"] = {"includeDeclaration": True}
+                rid = lsp.request(
+                    method,
+                    request_params,
+                )
+                resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+                if "error" in resp:
+                    fail(summary, step, f"{step} returned error", resp=resp)
+                result = resp.get("result") or []
+                if not isinstance(result, list) or len(result) == 0:
+                    fail(summary, step, f"expected non-empty {step} result", resp=resp)
+                record(summary, step, t0, count=len(result))
+
+            rid = lsp.request(
+                "textDocument/prepareRename",
+                {"textDocument": {"uri": doc_uri}, "position": position},
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(
+                    summary, "prepareRename", "prepareRename returned error", resp=resp
+                )
+            if resp.get("result") is None:
+                fail(
+                    summary, "prepareRename", "expected prepareRename range", resp=resp
+                )
+            record(summary, "prepareRename", t0)
+
+            rid = lsp.request(
+                "textDocument/rename",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": position,
+                    "newName": "renamed",
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(summary, "rename", "rename returned error", resp=resp)
+            changes = (resp.get("result") or {}).get("changes") or {}
+            edits = changes.get(doc_uri) or []
+            if len(edits) == 0:
+                fail(summary, "rename", "expected rename edits", resp=resp)
+            record(summary, "rename", t0, edits=len(edits))
 
             # Trigger diagnostics with invalid syntax.
             doc_text_v2 = 'tracepoint:syscalls:sys_enter_openat { printf("x");\n'
@@ -330,7 +449,12 @@ def main():
             msg = lsp.wait_for(is_publish, timeout_s=10.0)
             diags = msg.get("params", {}).get("diagnostics")
             if not isinstance(diags, list) or len(diags) == 0:
-                fail(summary, "diagnostics_publish", "expected non-empty diagnostics", msg=msg)
+                fail(
+                    summary,
+                    "diagnostics_publish",
+                    "expected non-empty diagnostics",
+                    msg=msg,
+                )
             record(summary, "diagnostics_publish", t0, count=len(diags))
 
             # Fix diagnostics.
@@ -345,7 +469,12 @@ def main():
             diags = msg.get("params", {}).get("diagnostics")
             # Accept both null and empty list as "no diagnostics"
             if diags is not None and (not isinstance(diags, list) or len(diags) != 0):
-                fail(summary, "diagnostics_clear", "expected empty diagnostics", response=msg)
+                fail(
+                    summary,
+                    "diagnostics_clear",
+                    "expected empty diagnostics",
+                    response=msg,
+                )
             record(summary, "diagnostics_clear", t0)
 
             rid = lsp.request("shutdown", None)

@@ -7,81 +7,76 @@ on:
 
 jobs:
   build-binaries:
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
+          - os: ubuntu-latest
+            platform: linux
+            arch: amd64
             vscode_target: linux-x64
-          - goos: linux
-            goarch: arm64
-            vscode_target: linux-arm64
-          - goos: darwin
-            goarch: amd64
+            binary_name: btfmt
+          - os: macos-13
+            platform: darwin
+            arch: amd64
             vscode_target: darwin-x64
-          - goos: darwin
-            goarch: arm64
+            binary_name: btfmt
+          - os: macos-14
+            platform: darwin
+            arch: arm64
             vscode_target: darwin-arm64
-          - goos: windows
-            goarch: amd64
+            binary_name: btfmt
+          - os: windows-latest
+            platform: windows
+            arch: amd64
             vscode_target: win32-x64
-          - goos: windows
-            goarch: arm64
-            vscode_target: win32-arm64
+            binary_name: btfmt.exe
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Build btfmt
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+        run: cargo build --release --bin btfmt
+
+      - name: Prepare binary
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME}
-          BINARY_NAME=btfmt
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            BINARY_NAME=btfmt.exe
-          fi
-          go build -ldflags="-s -w -X main.version=${VERSION}" -o ${BINARY_NAME} ./cmd/btfmt
+          mkdir -p dist
+          cp "target/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
 
       - name: Package (tar.gz)
-        if: matrix.goos != 'windows'
+        if: matrix.platform != 'windows'
+        shell: bash
         run: |
-          ARCHIVE_NAME=btfmt-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
-          tar -czvf ${ARCHIVE_NAME} btfmt
+          ARCHIVE_NAME=btfmt-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          tar -C dist -czvf ${ARCHIVE_NAME} btfmt
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
 
       - name: Package (zip)
-        if: matrix.goos == 'windows'
+        if: matrix.platform == 'windows'
+        shell: pwsh
         run: |
-          ARCHIVE_NAME=btfmt-${{ matrix.goos }}-${{ matrix.goarch }}.zip
-          zip ${ARCHIVE_NAME} btfmt.exe
-          echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+          $archiveName = "btfmt-${{ matrix.platform }}-${{ matrix.arch }}.zip"
+          Compress-Archive -Path "dist/${{ matrix.binary_name }}" -DestinationPath $archiveName -Force
+          "ARCHIVE_NAME=$archiveName" >> $env:GITHUB_ENV
 
       - name: Upload binary archive
         uses: actions/upload-artifact@v4
         with:
-          name: btfmt-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: btfmt-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARCHIVE_NAME }}
 
       - name: Prepare binary for VS Code extension
+        shell: bash
         run: |
           mkdir -p vscode-binary
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            cp btfmt.exe vscode-binary/
-          else
-            cp btfmt vscode-binary/
-          fi
+          cp "dist/${{ matrix.binary_name }}" vscode-binary/
 
       - name: Upload binary for VS Code extension
         uses: actions/upload-artifact@v4
@@ -97,11 +92,9 @@ jobs:
       matrix:
         include:
           - vscode_target: linux-x64
-          - vscode_target: linux-arm64
           - vscode_target: darwin-x64
           - vscode_target: darwin-arm64
           - vscode_target: win32-x64
-          - vscode_target: win32-arm64
     steps:
       - uses: actions/checkout@v4
 

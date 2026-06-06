@@ -10,8 +10,7 @@ tracepoint:syscalls:sys_enter_openat2
     printf("openat2: %s\n", str(args->filename));
 }
 
-tracepoint:syscalls:sys_enter_openat
-/ pid == 1234 /
+tracepoint:syscalls:sys_enter_openat/pid == 1234/
 {
     @opens[pid] = count();
 }

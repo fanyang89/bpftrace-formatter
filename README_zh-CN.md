@@ -31,11 +31,11 @@ bpftrace 脚本格式化工具，支持 VS Code 集成。
 | 平台          | 文件                        |
 | ------------- | --------------------------- |
 | Linux x64     | `btfmt-linux-amd64.tar.gz`  |
-| Linux ARM64   | `btfmt-linux-arm64.tar.gz`  |
 | macOS x64     | `btfmt-darwin-amd64.tar.gz` |
 | macOS ARM64   | `btfmt-darwin-arm64.tar.gz` |
 | Windows x64   | `btfmt-windows-amd64.zip`   |
-| Windows ARM64 | `btfmt-windows-arm64.zip`   |
+
+Linux ARM64 和 Windows ARM64 发布产物暂缓提供。
 
 解压并添加到 PATH：
 
@@ -47,7 +47,7 @@ sudo mv btfmt /usr/local/bin/
 ### 从源码构建
 
 ```bash
-go install github.com/fanyang89/bpftrace-formatter/cmd/btfmt@latest
+cargo install --git https://github.com/fanyang89/bpftrace-formatter.git
 ```
 
 或克隆仓库构建：
@@ -55,7 +55,8 @@ go install github.com/fanyang89/bpftrace-formatter/cmd/btfmt@latest
 ```bash
 git clone https://github.com/fanyang89/bpftrace-formatter.git
 cd bpftrace-formatter
-go build ./cmd/btfmt
+cargo build --release
+./target/release/btfmt --help
 ```
 
 ## 使用方法
@@ -105,6 +106,7 @@ btfmt [options] <file.bt> [file2.bt ...]
   -c, -config <file>     指定配置文件路径
   -v, -verbose           启用详细输出
   -generate-config       生成默认配置文件
+  -config-output <file>  生成配置文件的输出路径
   -version               显示版本信息
   -help                  显示帮助信息
 ```
@@ -153,11 +155,21 @@ btfmt -generate-config
 | `indent`      | `use_spaces`                 | true        | 使用空格而非制表符               |
 | `spacing`     | `around_operators`           | true        | 在 `=`、`+`、`-` 等周围加空格    |
 | `spacing`     | `around_commas`              | true        | 逗号后加空格                     |
+| `spacing`     | `around_parentheses`         | false       | 括号内加空格                     |
+| `spacing`     | `around_brackets`            | false       | 方括号内加空格                   |
 | `spacing`     | `before_block_start`         | true        | `{` 前加空格                     |
 | `spacing`     | `after_keywords`             | true        | `if`、`while` 等关键字后加空格   |
+| `spacing`     | `inside_predicates`          | true        | 谓词 `/.../` 内加空格            |
+| `line_breaks` | `max_line_length`            | 80          | 最大行宽提示                     |
+| `line_breaks` | `break_long_statements`      | true        | 允许长语句换行                   |
 | `line_breaks` | `empty_lines_between_probes` | 1           | 探针块之间的空行数               |
 | `line_breaks` | `empty_lines_after_shebang`  | 1           | shebang 后的空行数               |
+| `comments`    | `preserve_inline`            | true        | 尽量保留行内注释                 |
+| `comments`    | `indent_level`               | 0           | 独立注释的额外缩进级别           |
+| `probes`      | `align_predicates`           | false       | 对齐谓词格式                     |
+| `probes`      | `newline_between_specifiers` | false       | 探针 specifier 之间换行          |
 | `blocks`      | `brace_style`                | "next_line" | `"same_line"`、`"next_line"` 或 `"gnu"` |
+| `blocks`      | `indent_statements`          | true        | 缩进块内语句                     |
 
 ## VS Code 扩展
 
