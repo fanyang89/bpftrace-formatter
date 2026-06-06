@@ -2,4 +2,5 @@
 /.sisyphus
 /.claude
 /btfmt
+/target/
 *.vsix

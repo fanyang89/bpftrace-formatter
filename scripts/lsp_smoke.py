@@ -63,7 +63,10 @@ class LSPClient:
     def request(self, method: str, params):
         rid = self._next_id
         self._next_id += 1
-        self.send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+        msg = {"jsonrpc": "2.0", "id": rid, "method": method}
+        if params is not None:
+            msg["params"] = params
+        self.send(msg)
         return rid
 
     def notify(self, method: str, params):
@@ -147,7 +150,9 @@ def apply_text_edits(text: str, edits):
             return 0
         if line >= len(lines):
             return sum(len(x) for x in lines)
-        return sum(len(lines[i]) for i in range(line)) + min(character, len(lines[line]))
+        return sum(len(lines[i]) for i in range(line)) + min(
+            character, len(lines[line])
+        )
 
     def edit_key(e):
         r = e.get("range") or {}
@@ -228,7 +233,9 @@ def main():
                     stderr=cli.stderr[-4000:],
                 )
             expected_formatted = cli.stdout
-            record(summary, "cli_format", t0, bytes=len(expected_formatted.encode("utf-8")))
+            record(
+                summary, "cli_format", t0, bytes=len(expected_formatted.encode("utf-8"))
+            )
 
             lsp = LSPClient([btfmt_path, "lsp"], env=env)
             record(summary, "spawn", t0, pid=lsp.p.pid)
@@ -276,7 +283,9 @@ def main():
                 fail(summary, "formatting", "formatting returned error", resp=resp)
             edits = resp.get("result")
             if not isinstance(edits, list):
-                fail(summary, "formatting", "formatting result is not a list", resp=resp)
+                fail(
+                    summary, "formatting", "formatting result is not a list", resp=resp
+                )
             lsp_formatted = apply_text_edits(doc_text_v1, edits)
             if lsp_formatted != expected_formatted:
                 fail(
@@ -286,11 +295,20 @@ def main():
                     expected_prefix=expected_formatted[:200],
                     got_prefix=lsp_formatted[:200],
                 )
-            record(summary, "formatting", t0, edits=len(edits), bytes=len(lsp_formatted.encode("utf-8")))
+            record(
+                summary,
+                "formatting",
+                t0,
+                edits=len(edits),
+                bytes=len(lsp_formatted.encode("utf-8")),
+            )
 
             rid = lsp.request(
                 "textDocument/hover",
-                {"textDocument": {"uri": doc_uri}, "position": {"line": 0, "character": 1}},
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": {"line": 0, "character": 1},
+                },
             )
             resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
             if "error" in resp:
@@ -303,10 +321,20 @@ def main():
             )
             resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
             if "error" in resp:
-                fail(summary, "documentSymbol", "documentSymbol returned error", resp=resp)
+                fail(
+                    summary,
+                    "documentSymbol",
+                    "documentSymbol returned error",
+                    resp=resp,
+                )
             syms = resp.get("result")
             if not isinstance(syms, list):
-                fail(summary, "documentSymbol", "documentSymbol result is not a list", resp=resp)
+                fail(
+                    summary,
+                    "documentSymbol",
+                    "documentSymbol result is not a list",
+                    resp=resp,
+                )
             record(summary, "documentSymbol", t0, count=len(syms))
 
             # Trigger diagnostics with invalid syntax.
@@ -330,7 +358,12 @@ def main():
             msg = lsp.wait_for(is_publish, timeout_s=10.0)
             diags = msg.get("params", {}).get("diagnostics")
             if not isinstance(diags, list) or len(diags) == 0:
-                fail(summary, "diagnostics_publish", "expected non-empty diagnostics", msg=msg)
+                fail(
+                    summary,
+                    "diagnostics_publish",
+                    "expected non-empty diagnostics",
+                    msg=msg,
+                )
             record(summary, "diagnostics_publish", t0, count=len(diags))
 
             # Fix diagnostics.
@@ -345,7 +378,12 @@ def main():
             diags = msg.get("params", {}).get("diagnostics")
             # Accept both null and empty list as "no diagnostics"
             if diags is not None and (not isinstance(diags, list) or len(diags) != 0):
-                fail(summary, "diagnostics_clear", "expected empty diagnostics", response=msg)
+                fail(
+                    summary,
+                    "diagnostics_clear",
+                    "expected empty diagnostics",
+                    response=msg,
+                )
             record(summary, "diagnostics_clear", t0)
 
             rid = lsp.request("shutdown", None)

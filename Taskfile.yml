@@ -3,7 +3,6 @@ version: "3"
 
 vars:
   BINARY: btfmt
-  GRAMMAR: bpftrace.g4
 
 tasks:
   default:
@@ -19,22 +18,19 @@ tasks:
   build:
     desc: Build the btfmt binary
     sources:
-      - "**/*.go"
-      - go.mod
-      - go.sum
+      - "src/**/*.rs"
+      - Cargo.toml
+      - Cargo.lock
     generates:
       - "{{.BINARY}}"
     cmds:
-      - go build -o {{.BINARY}} ./cmd/btfmt
+      - cargo build --bin btfmt
+      - cp target/debug/btfmt {{.BINARY}}
 
   compile-grammar:
-    desc: Compile ANTLR grammar
-    sources:
-      - "{{.GRAMMAR}}"
-    generates:
-      - parser/*.go
+    desc: Deprecated; Rust uses tree-sitter-bpftrace from crates.io
     cmds:
-      - uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser {{.GRAMMAR}}
+      - cargo check
 
   clean:
     desc: Remove build artifacts
@@ -47,19 +43,19 @@ tasks:
   # ─────────────────────────────────────────────────────────────
 
   fmt:
-    desc: Format Go code
+    desc: Format Rust code
     cmds:
-      - go fmt ./...
+      - cargo fmt
 
   lint:
-    desc: Run golangci-lint
+    desc: Run clippy
     cmds:
-      - golangci-lint run ./...
+      - cargo clippy --all-targets --all-features -- -D warnings
 
   vet:
-    desc: Run go vet
+    desc: Run cargo check
     cmds:
-      - go vet ./...
+      - cargo check --all-targets
 
   check:
     desc: Run all code quality checks (fmt, vet, lint)
@@ -73,25 +69,24 @@ tasks:
   # ─────────────────────────────────────────────────────────────
 
   test:
-    desc: Run Go tests
+    desc: Run Rust tests
     cmds:
-      - go test ./...
+      - cargo test
 
   test:verbose:
-    desc: Run Go tests with verbose output
+    desc: Run Rust tests with verbose output
     cmds:
-      - go test -v ./...
+      - cargo test -- --nocapture
 
   test:cover:
     desc: Run tests with coverage report
     cmds:
-      - go test -coverprofile=coverage.out ./...
-      - go tool cover -html=coverage.out -o coverage.html
+      - cargo test
 
   test-tools:
     desc: Run tests against bpftrace/tools
     cmds:
-      - go test ./formatter -run TestASTFormatter_FormatsBpftraceToolsTree
+      - for f in bpftrace/tools/*.bt; do cargo run --quiet -- "$f" >/tmp/btfmt-tools.out || exit 1; done
 
   lsp-smoke:
     desc: Smoke test for btfmt LSP (stdio)
