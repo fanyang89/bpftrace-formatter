@@ -1,11 +1,11 @@
-use crate::config::Config;
+use crate::config::{load_from_base, Config};
 use crate::format::format_source;
 use crate::parse;
-use crate::text::{
-    all_identifier_occurrences, full_range, identifier_at_position, range_for_offsets,
-};
+use crate::text::{full_range, identifier_at_position, offset_for_position, range_for_offsets};
 use anyhow::Result as AnyResult;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -16,10 +16,17 @@ struct Document {
     text: String,
 }
 
+#[derive(Debug, Default)]
+struct ServerState {
+    workspace_roots: Vec<PathBuf>,
+    config_path: Option<PathBuf>,
+}
+
 #[derive(Debug)]
 struct Backend {
     client: Client,
     docs: Arc<Mutex<HashMap<Url, Document>>>,
+    state: Arc<Mutex<ServerState>>,
 }
 
 pub async fn run_server() -> AnyResult<()> {
@@ -28,6 +35,7 @@ pub async fn run_server() -> AnyResult<()> {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         docs: Arc::new(Mutex::new(HashMap::new())),
+        state: Arc::new(Mutex::new(ServerState::default())),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
     Ok(())
@@ -35,7 +43,8 @@ pub async fn run_server() -> AnyResult<()> {
 
 #[async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        self.configure_from_initialize(&params);
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "btfmt".to_string(),
@@ -99,11 +108,30 @@ impl LanguageServer for Backend {
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        if let Some(path) = config_path_setting_from_value(&params.settings) {
+            self.state
+                .lock()
+                .expect("server state poisoned")
+                .config_path = path;
+        }
+    }
+
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        let Some(doc) = self.doc(&params.text_document.uri) else {
+        let uri = params.text_document.uri;
+        let Some(doc) = self.doc(&uri) else {
             return Ok(Some(Vec::new()));
         };
-        match format_source(&doc.text, &Config::default()) {
+        let config = match self.config_for_uri(&uri) {
+            Ok(config) => config,
+            Err(err) => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("config load failed: {err:#}"))
+                    .await;
+                return Ok(None);
+            }
+        };
+        match format_source(&doc.text, &config) {
             Ok(text) => Ok(Some(vec![TextEdit {
                 range: full_range(&doc.text),
                 new_text: text,
@@ -161,10 +189,10 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(None);
         };
-        let Some((word, _)) = identifier_at_position(&doc.text, position) else {
+        let Some(symbol) = symbol_at_position(&doc.text, position) else {
             return Ok(None);
         };
-        let Some(range) = all_identifier_occurrences(&doc.text, &word)
+        let Some(occurrence) = symbol_occurrences(&doc.text, &symbol.text)
             .into_iter()
             .next()
         else {
@@ -172,7 +200,7 @@ impl LanguageServer for Backend {
         };
         Ok(Some(GotoDefinitionResponse::Array(vec![Location {
             uri,
-            range,
+            range: occurrence.range,
         }])))
     }
 
@@ -182,14 +210,14 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(Some(Vec::new()));
         };
-        let Some((word, _)) = identifier_at_position(&doc.text, position) else {
+        let Some(symbol) = symbol_at_position(&doc.text, position) else {
             return Ok(Some(Vec::new()));
         };
-        let locations = all_identifier_occurrences(&doc.text, &word)
+        let locations = symbol_occurrences(&doc.text, &symbol.text)
             .into_iter()
-            .map(|range| Location {
+            .map(|occurrence| Location {
                 uri: uri.clone(),
-                range,
+                range: occurrence.range,
             })
             .collect();
         Ok(Some(locations))
@@ -204,13 +232,13 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(Some(Vec::new()));
         };
-        let Some((word, _)) = identifier_at_position(&doc.text, position) else {
+        let Some(symbol) = symbol_at_position(&doc.text, position) else {
             return Ok(Some(Vec::new()));
         };
-        let highlights = all_identifier_occurrences(&doc.text, &word)
+        let highlights = symbol_occurrences(&doc.text, &symbol.text)
             .into_iter()
-            .map(|range| DocumentHighlight {
-                range,
+            .map(|occurrence| DocumentHighlight {
+                range: occurrence.range,
                 kind: Some(DocumentHighlightKind::TEXT),
             })
             .collect();
@@ -224,8 +252,8 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&params.text_document.uri) else {
             return Ok(None);
         };
-        Ok(identifier_at_position(&doc.text, params.position)
-            .map(|(_, range)| PrepareRenameResponse::Range(range)))
+        Ok(symbol_at_position(&doc.text, params.position)
+            .map(|symbol| PrepareRenameResponse::Range(symbol.range)))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
@@ -234,14 +262,18 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(None);
         };
-        let Some((word, _)) = identifier_at_position(&doc.text, position) else {
+        let Some(symbol) = symbol_at_position(&doc.text, position) else {
             return Ok(None);
         };
-        let edits: Vec<TextEdit> = all_identifier_occurrences(&doc.text, &word)
+        let replacement = match normalize_rename(&params.new_name, symbol.sigil) {
+            Some(replacement) => replacement,
+            None => return Ok(None),
+        };
+        let edits: Vec<TextEdit> = symbol_occurrences(&doc.text, &symbol.text)
             .into_iter()
-            .map(|range| TextEdit {
-                range,
-                new_text: params.new_name.clone(),
+            .map(|occurrence| TextEdit {
+                range: occurrence.range,
+                new_text: replacement.clone(),
             })
             .collect();
         let mut changes = HashMap::new();
@@ -255,6 +287,47 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    fn configure_from_initialize(&self, params: &InitializeParams) {
+        let mut state = self.state.lock().expect("server state poisoned");
+        state.workspace_roots = workspace_roots(params);
+        state.config_path = params
+            .initialization_options
+            .as_ref()
+            .and_then(config_path_setting_from_value)
+            .flatten();
+    }
+
+    fn config_for_uri(&self, uri: &Url) -> AnyResult<Config> {
+        let state = self.state.lock().expect("server state poisoned");
+        let document_dir = uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        if let Some(config_path) = &state.config_path {
+            if config_path.as_os_str().is_empty() {
+                return Ok(Config::default());
+            }
+            let path = if config_path.is_absolute() {
+                config_path.clone()
+            } else if let Some(root) = state.workspace_roots.first() {
+                root.join(config_path)
+            } else if let Some(dir) = &document_dir {
+                dir.join(config_path)
+            } else {
+                config_path.clone()
+            };
+            if path.exists() {
+                return Config::load(&path);
+            }
+            return Ok(Config::default());
+        }
+
+        if let Some(dir) = document_dir {
+            return load_from_base(&dir, None);
+        }
+        Ok(Config::default())
+    }
+
     async fn upsert(&self, uri: Url, text: String, version: Option<i32>) {
         let diagnostics = parse::parse(&text)
             .map(|parsed| parsed.diagnostics)
@@ -282,6 +355,37 @@ impl Backend {
             .expect("document store poisoned")
             .get(uri)
             .cloned()
+    }
+}
+
+fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
+    if let Some(folders) = &params.workspace_folders {
+        let roots: Vec<PathBuf> = folders
+            .iter()
+            .filter_map(|folder| folder.uri.to_file_path().ok())
+            .collect();
+        if !roots.is_empty() {
+            return roots;
+        }
+    }
+    params
+        .root_uri
+        .as_ref()
+        .and_then(|uri| uri.to_file_path().ok())
+        .into_iter()
+        .collect()
+}
+
+fn config_path_setting_from_value(value: &Value) -> Option<Option<PathBuf>> {
+    let path = value
+        .get("btfmt")
+        .and_then(|btfmt| btfmt.get("configPath"))
+        .or_else(|| value.get("configPath"))
+        .and_then(Value::as_str)?;
+    if path.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(PathBuf::from(path)))
     }
 }
 
@@ -322,6 +426,111 @@ fn document_symbols(text: &str) -> Vec<DocumentSymbol> {
             Some(symbol)
         })
         .collect()
+}
+
+#[derive(Debug, Clone)]
+struct SymbolOccurrence {
+    text: String,
+    sigil: char,
+    start: usize,
+    end: usize,
+    range: Range,
+}
+
+fn symbol_at_position(text: &str, position: Position) -> Option<SymbolOccurrence> {
+    let offset = offset_for_position(text, position);
+    symbol_occurrences(text, "")
+        .into_iter()
+        .filter(|occurrence| occurrence.start <= offset && offset <= occurrence.end)
+        .min_by_key(|occurrence| occurrence.end - occurrence.start)
+}
+
+fn symbol_occurrences(text: &str, needle: &str) -> Vec<SymbolOccurrence> {
+    let bytes = text.as_bytes();
+    let mut occurrences = Vec::new();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        if text[idx..].starts_with("//") {
+            idx = read_line_end(text, idx);
+            continue;
+        }
+        if matches!(bytes[idx], b'\'' | b'\"') {
+            idx = read_string_end(bytes, idx, bytes[idx]);
+            continue;
+        }
+
+        if matches!(bytes[idx], b'$' | b'@')
+            && bytes.get(idx + 1).is_some_and(|byte| is_ident_start(*byte))
+        {
+            let start = idx;
+            idx += 2;
+            while bytes.get(idx).is_some_and(|byte| is_ident_continue(*byte)) {
+                idx += 1;
+            }
+            let symbol_text = &text[start..idx];
+            if needle.is_empty() || symbol_text == needle {
+                occurrences.push(SymbolOccurrence {
+                    text: symbol_text.to_string(),
+                    sigil: bytes[start] as char,
+                    start,
+                    end: idx,
+                    range: range_for_offsets(text, start, idx),
+                });
+            }
+            continue;
+        }
+
+        idx += text[idx..].chars().next().map_or(1, char::len_utf8);
+    }
+
+    occurrences
+}
+
+fn normalize_rename(new_name: &str, sigil: char) -> Option<String> {
+    let mut name = new_name.trim();
+    if name.starts_with(['$', '@']) {
+        if !name.starts_with(sigil) {
+            return None;
+        }
+        name = &name[1..];
+    }
+    let mut bytes = name.bytes();
+    let first = bytes.next()?;
+    if !is_ident_start(first) || !bytes.all(is_ident_continue) {
+        return None;
+    }
+    Some(format!("{sigil}{name}"))
+}
+
+fn read_line_end(text: &str, start: usize) -> usize {
+    text[start..]
+        .find('\n')
+        .map(|rel| start + rel)
+        .unwrap_or(text.len())
+}
+
+fn read_string_end(bytes: &[u8], start: usize, quote: u8) -> usize {
+    let mut idx = start + 1;
+    while idx < bytes.len() {
+        if bytes[idx] == b'\\' {
+            idx += 2;
+            continue;
+        }
+        if bytes[idx] == quote {
+            return idx + 1;
+        }
+        idx += 1;
+    }
+    bytes.len()
+}
+
+fn is_ident_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn is_ident_continue(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn completion_items() -> Vec<CompletionItem> {

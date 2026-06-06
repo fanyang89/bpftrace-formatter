@@ -31,11 +31,11 @@ Download the pre-built binary from [Releases](https://github.com/fanyang89/bpftr
 | Platform      | File                        |
 | ------------- | --------------------------- |
 | Linux x64     | `btfmt-linux-amd64.tar.gz`  |
-| Linux ARM64   | `btfmt-linux-arm64.tar.gz`  |
 | macOS x64     | `btfmt-darwin-amd64.tar.gz` |
 | macOS ARM64   | `btfmt-darwin-arm64.tar.gz` |
 | Windows x64   | `btfmt-windows-amd64.zip`   |
-| Windows ARM64 | `btfmt-windows-arm64.zip`   |
+
+Linux ARM64 and Windows ARM64 release artifacts are currently deferred.
 
 Extract and add to your PATH:
 
@@ -47,7 +47,7 @@ sudo mv btfmt /usr/local/bin/
 ### Build from Source
 
 ```bash
-go install github.com/fanyang89/bpftrace-formatter/cmd/btfmt@latest
+cargo install --git https://github.com/fanyang89/bpftrace-formatter.git
 ```
 
 Or clone and build:
@@ -55,7 +55,8 @@ Or clone and build:
 ```bash
 git clone https://github.com/fanyang89/bpftrace-formatter.git
 cd bpftrace-formatter
-go build ./cmd/btfmt
+cargo build --release
+./target/release/btfmt --help
 ```
 
 ## Usage
@@ -105,6 +106,7 @@ Options:
   -c, -config <file>     Path to configuration file
   -v, -verbose           Enable verbose output
   -generate-config       Generate default configuration file
+  -config-output <file>  Output path for generated configuration
   -version               Show version information
   -help                  Show help message
 ```
@@ -153,11 +155,21 @@ Example `.btfmt.json`:
 | `indent`      | `use_spaces`                 | true        | Use spaces instead of tabs               |
 | `spacing`     | `around_operators`           | true        | Space around `=`, `+`, `-`, etc.         |
 | `spacing`     | `around_commas`              | true        | Space after commas                       |
+| `spacing`     | `around_parentheses`         | false       | Space inside parentheses                 |
+| `spacing`     | `around_brackets`            | false       | Space inside brackets                    |
 | `spacing`     | `before_block_start`         | true        | Space before `{`                         |
 | `spacing`     | `after_keywords`             | true        | Space after `if`, `while`, etc.          |
+| `spacing`     | `inside_predicates`          | true        | Space inside predicate `/.../` sections  |
+| `line_breaks` | `max_line_length`            | 80          | Maximum line length hint                 |
+| `line_breaks` | `break_long_statements`      | true        | Allow wrapping long statements           |
 | `line_breaks` | `empty_lines_between_probes` | 1           | Empty lines between probe blocks         |
 | `line_breaks` | `empty_lines_after_shebang`  | 1           | Empty lines after shebang                |
+| `comments`    | `preserve_inline`            | true        | Preserve inline comments when possible   |
+| `comments`    | `indent_level`               | 0           | Extra indentation for standalone comments |
+| `probes`      | `align_predicates`           | false       | Align predicate formatting               |
+| `probes`      | `newline_between_specifiers` | false       | Line break between probe specifiers      |
 | `blocks`      | `brace_style`                | "next_line" | `"same_line"`, `"next_line"`, or `"gnu"` |
+| `blocks`      | `indent_statements`          | true        | Indent statements inside blocks          |
 
 ## VS Code Extension
 

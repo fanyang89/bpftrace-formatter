@@ -5,9 +5,9 @@ It summarizes the commands and style conventions observed in the codebase.
 
 ## Repository Overview
 
-- Go module: `github.com/fanyang89/bpftrace-formatter` (`go.mod`)
-- Go version: `1.24.6` (`go.mod`)
-- Purpose: format bpftrace scripts using ANTLR-generated parser + Go visitor
+- Rust crate: `btfmt` (`Cargo.toml`)
+- Purpose: format bpftrace scripts using `tree-sitter-bpftrace`, with CLI and LSP support
+- Runtime integration: VS Code extension launches `btfmt lsp`
 
 ## Communication Rule
 
@@ -20,122 +20,110 @@ It summarizes the commands and style conventions observed in the codebase.
 - Build: `task build`
 - Test: `task test`
 - Test (tools fixtures): `task test-tools`
-- Format Go code: `task fmt`
-- Compile grammar: `task compile-grammar`
+- Format Rust code: `task fmt`
+- LSP smoke test: `task lsp-smoke`
 
-### Direct Go commands
+### Direct Cargo Commands
 
-- Dependencies: `go mod tidy`
-- Build: `go build ./cmd/btfmt`
-- Build (README example): `go build -o bpftrace-formatter`
-- Test (all): `go test ./...`
-- Test (verbose): `go test -v`
-- Format: `go fmt ./...`
-- Grammar compile (direct): `uvx --from antlr4-tools antlr4 -Dlanguage=Go -o parser bpftrace.g4`
+- Build: `cargo build --bin btfmt`
+- Build release: `cargo build --release --bin btfmt`
+- Test: `cargo test --all-targets --all-features`
+- Format: `cargo fmt --all`
+- Format check: `cargo fmt --all -- --check`
+- Lint: `cargo clippy --all-targets --all-features -- -D warnings`
 
-### Run the formatter
+### Run The Formatter
 
 - Format to stdout: `./btfmt <file.bt>`
 - Write in place: `./btfmt -i <file.bt>`
 - Write to file: `./btfmt -w <file.bt>`
+- Start LSP server: `./btfmt lsp`
 
-## Running a Single Test (Go)
+## Running A Single Rust Test
 
-Go does not expose a custom test runner here; use `go test` with `-run`.
-
-- Run a single test across all packages:
-  `go test ./... -run TestName`
-- Run a single test in one package:
-  `go test ./formatter -run TestASTFormatter_GoldenFiles_DefaultConfig`
-- Run tests with fixtures from bpftrace tools:
-  `BPFTRACE_TOOLS_DIR=bpftrace/tools go test ./... -run TestName`
+- Run one integration test target: `cargo test --test formatter`
+- Run one test by name: `cargo test formats_bpftrace_tools_tree`
+- Run with output: `cargo test -- --nocapture`
 
 ## Project Layout
 
-- `cmd/btfmt/`: CLI entry point and tests
-- `formatter/`: AST formatter + visitor + golden tests
-- `config/`: configuration types and loader
-- `parser/`: generated ANTLR parser/lexer (do not edit by hand)
-- `bpftrace.g4`: grammar source (edit here, then regenerate parser)
+- `src/cli.rs`: CLI entry point logic
+- `src/config.rs`: configuration types and loader
+- `src/format.rs`: formatter implementation
+- `src/lsp.rs`: LSP server implementation
+- `src/parse.rs`: tree-sitter parsing and diagnostics
+- `src/text.rs`: text offset/range helpers
+- `tests/`: Rust integration tests
 - `testdata/`: input fixtures
-- `testdata/golden/`: expected formatted output
+- `testdata/golden/`: expected Rust formatter output
 - `bpftrace/tools/`: upstream bpftrace tool scripts for acceptance tests
+- `vscode-extension/`: VS Code extension client
 
-## Generated Code Policy
+## Parser Policy
 
-- Files in `parser/` are generated from `bpftrace.g4`.
-- Do not hand-edit `parser/*.go`; regenerate via `task compile-grammar`.
-- Grammar changes should update golden tests and fixtures as needed.
+- The parser is provided by the `tree-sitter-bpftrace` crate from crates.io.
+- Do not add generated parser sources to this repository.
+- If grammar behavior needs changes, prefer upstreaming or pinning/updating `tree-sitter-bpftrace`.
 
 ## Configuration Files
 
-- Default config values in `config/config.go`.
-- Example config in `.btfmt.json` (root).
-- Config search order (see `cmd/btfmt/main.go`):
-  1. `-config` flag
-  2. `.btfmt.json` in cwd or parents
-  3. `~/.btfmt.json`
+- Default config values live in `src/config.rs`.
+- Example config is `.btfmt.json` at repository root.
+- Config search order:
+  1. `-config` flag or explicit LSP config path
+  2. `.btfmt.json` in the document/current directory or parents
+  3. `~/.btfmt.json` for CLI
   4. built-in defaults
 
 ## Testing Conventions
 
-- Tests live alongside packages (`*_test.go`).
+- Unit tests may live beside Rust modules.
+- Integration tests live in `tests/*.rs`.
 - Golden tests read fixtures from `testdata/` and compare to `testdata/golden/`.
-- Tests use `t.Helper()`, `t.TempDir()`, `t.Cleanup()`, and `t.Fatalf()`.
-- Acceptance tests may read `bpftrace/tools` via `BPFTRACE_TOOLS_DIR`.
+- Acceptance tests parse/format files under `bpftrace/tools`.
+- LSP behavior is covered by `tests/lsp_smoke.rs`, which runs `scripts/lsp_smoke.py` against the Cargo-built binary.
 
-## Code Style Guidelines (Observed)
+## Code Style Guidelines
 
 ### Formatting
 
-- Use `gofmt`/`go fmt` formatting.
-- Tabs for indentation (standard Go formatting).
-- Long expected strings in tests are built via `"..." +` concatenation.
+- Use `cargo fmt --all`.
+- Keep code idiomatic and simple; prefer small functions when behavior is independently testable.
 
 ### Imports
 
-- Group standard library imports first, then a blank line, then module imports.
-- Prefer explicit imports over dot/blank unless required (none used here).
+- Use standard Rust import grouping as produced by rustfmt.
 
 ### Naming
 
-- Exported types/functions: `PascalCase` with doc comments.
-- Unexported helpers: `camelCase` with inline comments for sections.
-- Test names: `TestXxx` matching Go conventions.
+- Public Rust types/functions: `PascalCase` for types, `snake_case` for functions.
+- Test names: descriptive `snake_case`.
 
-### Errors and Control Flow
+### Errors And Control Flow
 
-- Early returns on error (`if err != nil { return ... }`).
-- Wrap errors with context using `fmt.Errorf("...: %w", err)`.
-- CLI layer prints user-facing errors and exits non-zero; helpers return errors.
+- Use `anyhow::Result` at CLI/application boundaries.
+- Use early returns for error handling and simple branch exits.
+- CLI should print user-facing errors and exit non-zero through `src/main.rs`.
 
 ### Comments
 
-- Use doc comments for exported APIs.
-- Use inline comments to clarify formatting steps in visitors/formatters.
+- Add comments only for non-obvious behavior or integration constraints.
 
 ## Linting / Static Analysis
 
-- No lint configuration detected (`.golangci.yml` / `.editorconfig` not present).
-- Use `go fmt` and `go test` as primary checks.
+- Primary checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --all-targets --all-features`.
 
-## External Rules Files
+## Editing Guidance For Agents
 
-- `.cursor/rules/`: not present.
-- `.cursorrules`: not present.
-- `.github/copilot-instructions.md`: not present.
-
-## Editing Guidance for Agents
-
-- Avoid modifying `parser/` (generated).
-- Keep formatter changes small and update golden fixtures/tests if output changes.
-- Maintain config defaults and JSON tags when adding config options.
-- Keep file I/O and CLI behavior consistent with `cmd/btfmt/main.go`.
+- Keep formatter behavior changes small and update golden fixtures/tests when output changes.
+- Maintain config defaults and JSON field names when adding config options.
+- Keep CLI and LSP formatting behavior consistent where feasible.
+- Avoid committing build outputs such as `target/` or `btfmt`.
 
 ## Quick References
 
-- Main entrypoint: `cmd/btfmt/main.go`
-- Formatting core: `formatter/ast_formatter.go`
-- Visitor logic: `formatter/ast_visitor.go`
-- Config loader: `config/loader.go`
-- Default config: `config/config.go`
+- Main entrypoint: `src/main.rs`
+- CLI: `src/cli.rs`
+- Formatter: `src/format.rs`
+- LSP: `src/lsp.rs`
+- Config: `src/config.rs`

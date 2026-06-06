@@ -172,6 +172,14 @@ def apply_text_edits(text: str, edits):
     return out
 
 
+def offset_to_position(text: str, offset: int):
+    # This smoke uses ASCII-only fixtures.
+    before = text[:offset]
+    line = before.count("\n")
+    line_start = before.rfind("\n") + 1
+    return {"line": line, "character": offset - line_start}
+
+
 def fail(summary, step: str, msg: str, **extra):
     summary["ok"] = False
     summary["failed_step"] = step
@@ -201,6 +209,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="btfmt-lsp-smoke-") as td:
             td_path = pathlib.Path(td)
             doc_path = td_path / "smoke.bt"
+            config_path = td_path / ".btfmt.json"
             env = os.environ.copy()
             # Make smoke deterministic: avoid picking up user/global configs.
             env["HOME"] = str(td_path)
@@ -210,10 +219,11 @@ def main():
             btfmt_path = os.environ.get("BTFMT_PATH") or str(
                 (pathlib.Path.cwd() / "btfmt").resolve()
             )
+            config_path.write_text('{"indent":{"size":2}}\n', encoding="utf-8")
 
             # Intentionally unformatted input.
             doc_text_v1 = (
-                'tracepoint:syscalls:sys_enter_openat{printf("openat: %s\\n",str(args.filename));}\n'
+                'tracepoint:syscalls:sys_enter_openat{$target=1;@opens[$target]=count();printf("openat: %s\\n",str(args.filename));}\n'
                 'tracepoint:syscalls:sys_enter_openat2{printf("openat2: %s\\n",str(args->filename));}\n'
             )
             doc_path.write_text(doc_text_v1, encoding="utf-8")
@@ -225,6 +235,7 @@ def main():
                 stderr=subprocess.PIPE,
                 text=True,
                 env=env,
+                cwd=str(td_path),
             )
             if cli.returncode != 0:
                 fail(
@@ -247,6 +258,7 @@ def main():
                 "rootUri": td_path.absolute().as_uri(),
                 "capabilities": {},
                 "clientInfo": {"name": "task-lsp-smoke", "version": "0"},
+                "initializationOptions": {"btfmt": {"configPath": ".btfmt.json"}},
                 "workspaceFolders": [
                     {"uri": td_path.absolute().as_uri(), "name": "btfmt-lsp-smoke"}
                 ],
@@ -360,7 +372,7 @@ def main():
                 fail(summary, "completion", "expected completion items", resp=resp)
             record(summary, "completion", t0, count=completion_count)
 
-            position = {"line": 0, "character": 1}
+            position = offset_to_position(doc_text_v1, doc_text_v1.index("$target") + 1)
             for method, step in [
                 ("textDocument/definition", "definition"),
                 ("textDocument/references", "references"),
