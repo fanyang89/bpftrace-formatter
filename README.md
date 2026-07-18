@@ -99,17 +99,25 @@ tracepoint:syscalls:sys_enter_openat
 ### CLI Options
 
 ```
-btfmt [options] <file.bt> [file2.bt ...]
+btfmt [options] <file.bt|-> [file2.bt ...]
 
 Options:
   -w                     Write result to source file
   -i                     Edit files in place (same as -w)
   -c, -config <file>     Path to configuration file
   -v, -verbose           Enable verbose output
+  --check                Exit non-zero if input is not formatted
   -generate-config       Generate default configuration file
   -config-output <file>  Output path for generated configuration
   -version               Show version information
   -help                  Show help message
+```
+
+Read from stdin with an explicit `-`:
+
+```bash
+cat script.bt | btfmt -
+btfmt --check script.bt
 ```
 
 ## Configuration

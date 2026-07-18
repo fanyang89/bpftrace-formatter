@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
@@ -27,13 +27,19 @@ struct Cli {
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
+    #[arg(
+        long = "check",
+        conflicts_with_all = ["write", "in_place", "generate_config"]
+    )]
+    check: bool,
+
     #[arg(long = "generate-config")]
     generate_config: bool,
 
     #[arg(long = "config-output", default_value = ".btfmt.json")]
     config_output: PathBuf,
 
-    #[arg(value_name = "FILE")]
+    #[arg(value_name = "FILE", allow_hyphen_values = true)]
     files: Vec<PathBuf>,
 }
 
@@ -63,15 +69,54 @@ pub async fn run() -> Result<()> {
 
     let config = load_for_cwd(cli.config.as_deref())?;
     let write_to_file = cli.write || cli.in_place;
+    let stdin_count = cli.files.iter().filter(|path| is_stdin(path)).count();
+    if stdin_count > 1 {
+        anyhow::bail!("stdin may only be specified once");
+    }
+    if write_to_file && stdin_count != 0 {
+        anyhow::bail!("cannot write stdin in place");
+    }
+
+    let mut check_failures = Vec::new();
     for path in &cli.files {
+        let label = input_label(path);
         if cli.verbose {
-            eprintln!("Processing: {}", path.display());
+            eprintln!("Processing: {label}");
         }
-        let changed = process_file(path, &config, write_to_file)?;
+        let source = read_input(path)?;
+        let formatted =
+            format_source(&source, &config).with_context(|| format!("formatting {label}"))?;
+        let changed = formatted != source;
+
+        if cli.check {
+            if changed {
+                check_failures.push(label.clone());
+            }
+            if cli.verbose {
+                let status = if changed {
+                    "Would reformat"
+                } else {
+                    "Unchanged"
+                };
+                eprintln!("{status}: {label}");
+            }
+        } else if write_to_file {
+            if changed {
+                write_atomic(path, formatted.as_bytes())?;
+            }
+        } else {
+            let mut stdout = io::stdout().lock();
+            stdout.write_all(formatted.as_bytes())?;
+        }
+
         if cli.verbose && write_to_file {
             let status = if changed { "Formatted" } else { "Unchanged" };
-            eprintln!("{status}: {}", path.display());
+            eprintln!("{status}: {label}");
         }
+    }
+
+    if !check_failures.is_empty() {
+        anyhow::bail!("format check failed for: {}", check_failures.join(", "));
     }
     Ok(())
 }
@@ -90,20 +135,29 @@ fn normalized_args() -> Vec<OsString> {
         .collect()
 }
 
-fn process_file(path: &Path, config: &Config, write_to_file: bool) -> Result<bool> {
-    let source = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let formatted =
-        format_source(&source, config).with_context(|| format!("formatting {}", path.display()))?;
-    if write_to_file {
-        if formatted == source {
-            return Ok(false);
-        }
-        write_atomic(path, formatted.as_bytes())?;
+fn is_stdin(path: &Path) -> bool {
+    path == Path::new("-")
+}
+
+fn input_label(path: &Path) -> String {
+    if is_stdin(path) {
+        "<stdin>".to_string()
     } else {
-        let mut stdout = io::stdout().lock();
-        stdout.write_all(formatted.as_bytes())?;
+        path.display().to_string()
     }
-    Ok(true)
+}
+
+fn read_input(path: &Path) -> Result<String> {
+    if is_stdin(path) {
+        let mut source = String::new();
+        io::stdin()
+            .lock()
+            .read_to_string(&mut source)
+            .context("reading stdin")?;
+        Ok(source)
+    } else {
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+    }
 }
 
 fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {

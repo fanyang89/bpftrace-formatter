@@ -99,17 +99,25 @@ tracepoint:syscalls:sys_enter_openat
 ### 命令行选项
 
 ```
-btfmt [options] <file.bt> [file2.bt ...]
+btfmt [options] <file.bt|-> [file2.bt ...]
 
 选项：
   -w                     将结果写回源文件
   -i                     就地修改文件（同 -w）
   -c, -config <file>     指定配置文件路径
   -v, -verbose           启用详细输出
+  --check                输入未格式化时返回非零状态
   -generate-config       生成默认配置文件
   -config-output <file>  生成配置文件的输出路径
   -version               显示版本信息
   -help                  显示帮助信息
+```
+
+使用显式 `-` 从标准输入读取：
+
+```bash
+cat script.bt | btfmt -
+btfmt --check script.bt
 ```
 
 ## 配置

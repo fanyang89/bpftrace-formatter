@@ -23,6 +23,100 @@ fn cli_writes_to_stdout_by_default() {
 }
 
 #[test]
+fn cli_formats_explicit_stdin() {
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("-")
+        .write_stdin("BEGIN{exit();}")
+        .assert()
+        .success()
+        .stdout("BEGIN\n{\n    exit();\n}\n");
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("-")
+        .write_stdin("BEGIN{exit();")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("formatting <stdin>"));
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["-", "-"])
+        .write_stdin("BEGIN{exit();}")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("stdin may only be specified once"));
+}
+
+#[test]
+fn cli_check_reports_changed_files_without_writing() {
+    let dir = tempdir().unwrap();
+    let unchanged = dir.path().join("unchanged.bt");
+    let changed = dir.path().join("changed.bt");
+    let formatted = "BEGIN\n{\n    exit();\n}\n";
+    fs::write(&unchanged, formatted).unwrap();
+    fs::write(&changed, "END{exit();}").unwrap();
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("--check")
+        .arg(&unchanged)
+        .assert()
+        .success()
+        .stdout("");
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["--check", "--verbose"])
+        .arg(&unchanged)
+        .arg(&changed)
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(
+            predicate::str::contains("Unchanged:")
+                .and(predicate::str::contains("Would reformat:"))
+                .and(predicate::str::contains("format check failed")),
+        );
+    assert_eq!(fs::read_to_string(&changed).unwrap(), "END{exit();}");
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["--check", "-"])
+        .write_stdin(formatted)
+        .assert()
+        .success()
+        .stdout("");
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["--check", "-"])
+        .write_stdin("BEGIN{exit();}")
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("<stdin>"));
+}
+
+#[test]
+fn cli_rejects_writing_stdin_and_check_write_conflicts() {
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["-w", "-"])
+        .write_stdin("BEGIN{exit();}")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot write stdin in place"));
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["--check", "-w", "input.bt"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
 fn cli_write_and_in_place_update_files() {
     for flag in ["-w", "-i"] {
         let dir = tempdir().unwrap();
