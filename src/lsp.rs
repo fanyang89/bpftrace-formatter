@@ -1,3 +1,4 @@
+mod catalog;
 mod snapshot;
 mod symbols;
 
@@ -556,47 +557,21 @@ fn new_document_symbol(
 }
 
 fn completion_items() -> Vec<CompletionItem> {
-    [
-        ("BEGIN", CompletionItemKind::KEYWORD),
-        ("END", CompletionItemKind::KEYWORD),
-        ("tracepoint", CompletionItemKind::EVENT),
-        ("kprobe", CompletionItemKind::EVENT),
-        ("kretprobe", CompletionItemKind::EVENT),
-        ("uprobe", CompletionItemKind::EVENT),
-        ("printf", CompletionItemKind::FUNCTION),
-        ("print", CompletionItemKind::FUNCTION),
-        ("count", CompletionItemKind::FUNCTION),
-        ("sum", CompletionItemKind::FUNCTION),
-        ("avg", CompletionItemKind::FUNCTION),
-        ("hist", CompletionItemKind::FUNCTION),
-        ("if", CompletionItemKind::KEYWORD),
-        ("while", CompletionItemKind::KEYWORD),
-        ("for", CompletionItemKind::KEYWORD),
-    ]
-    .into_iter()
-    .map(|(label, kind)| CompletionItem {
-        label: label.to_string(),
-        kind: Some(kind),
-        ..CompletionItem::default()
-    })
-    .collect()
+    catalog::entries()
+        .iter()
+        .filter(|entry| entry.contexts != 0)
+        .copied()
+        .map(catalog::CatalogEntry::completion_item)
+        .collect()
 }
 
 fn hover_markdown(word: &str) -> Option<String> {
-    let value = match word {
-        "BEGIN" => "Run once when bpftrace starts.",
-        "END" => "Run once when bpftrace exits.",
-        "tracepoint" => "Kernel tracepoint probe.",
-        "kprobe" => "Kernel function entry probe.",
-        "kretprobe" => "Kernel function return probe.",
-        "printf" => "Print formatted output.",
-        "print" => "Print a value or map.",
-        "count" => "Count occurrences in a map aggregation.",
-        "sum" => "Sum values in a map aggregation.",
-        "hist" => "Build a power-of-two histogram.",
-        _ => return None,
-    };
-    Some(format!("**bpftrace** `{word}`\n\n{value}"))
+    let entry = catalog::find(word)?;
+    Some(format!(
+        "**bpftrace** `{word}`\n\n{}\n\n_{}_",
+        entry.documentation,
+        catalog::CATALOG_VERSION
+    ))
 }
 
 #[cfg(test)]
