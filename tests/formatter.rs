@@ -16,6 +16,9 @@ fn parses_valid_input_and_reports_invalid_input() {
     let invalid = parse("BEGIN { printf(\"x\");").unwrap();
     assert!(!invalid.diagnostics.is_empty());
     assert!(format_source("BEGIN { printf(\"x\");", &Config::default()).is_err());
+
+    let invalid_unicode = parse("BEGIN { printf(\"😀\");").unwrap();
+    assert!(!invalid_unicode.diagnostics.is_empty());
 }
 
 #[test]

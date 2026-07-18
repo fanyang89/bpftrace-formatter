@@ -6,11 +6,12 @@ use tower_lsp::lsp_types::Position;
 
 #[test]
 fn offset_and_position_round_trip_ascii_and_unicode() {
-    let text = "αBEGIN\n  printf(\"x\");\n";
+    let text = "α😀BEGIN\n  printf(\"x\");\n";
     let offset = text.find("printf").unwrap();
     let pos = position_for_offset(text, offset);
     assert_eq!(offset_for_position(text, pos), offset);
     assert_eq!(position_for_offset(text, text.len()).line, 2);
+    assert_eq!(position_for_offset(text, 1), Position::new(0, 0));
 }
 
 #[test]
@@ -23,6 +24,16 @@ fn identifier_lookup_supports_variables_and_maps() {
         &text[offset_for_position(text, range.start)..offset_for_position(text, range.end)],
         "$x"
     );
+}
+
+#[test]
+fn identifier_lookup_handles_end_of_file_and_unicode() {
+    let text = "$value";
+    let (name, _) = identifier_at_position(text, position_for_offset(text, text.len())).unwrap();
+    assert_eq!(name, "$value");
+
+    let text = "BEGIN { printf(\"😀\"); } 😀";
+    assert!(identifier_at_position(text, position_for_offset(text, text.len())).is_none());
 }
 
 #[test]

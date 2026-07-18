@@ -12,7 +12,7 @@ pub fn line_starts(text: &str) -> Vec<usize> {
 
 pub fn position_for_offset(text: &str, offset: usize) -> Position {
     let starts = line_starts(text);
-    let offset = offset.min(text.len());
+    let offset = floor_char_boundary(text, offset.min(text.len()));
     let line_idx = match starts.binary_search(&offset) {
         Ok(idx) => idx,
         Err(idx) => idx.saturating_sub(1),
@@ -65,15 +65,20 @@ pub fn identifier_at_position(text: &str, position: Position) -> Option<(String,
         return None;
     }
 
-    let mut start = offset.min(bytes.len());
-    if start == bytes.len() && start > 0 {
-        start -= 1;
-    }
+    let anchor = if bytes.get(offset).is_some_and(|byte| is_ident_byte(*byte)) {
+        offset
+    } else if offset > 0 && is_ident_byte(bytes[offset - 1]) {
+        offset - 1
+    } else {
+        return None;
+    };
+
+    let mut start = anchor;
     while start > 0 && is_ident_byte(bytes[start - 1]) {
         start -= 1;
     }
 
-    let mut end = offset.min(bytes.len());
+    let mut end = anchor + 1;
     while end < bytes.len() && is_ident_byte(bytes[end]) {
         end += 1;
     }
@@ -83,6 +88,13 @@ pub fn identifier_at_position(text: &str, position: Position) -> Option<(String,
     }
     let value = text[start..end].to_string();
     Some((value, range_for_offsets(text, start, end)))
+}
+
+fn floor_char_boundary(text: &str, mut offset: usize) -> usize {
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
 }
 
 pub fn all_identifier_occurrences(text: &str, needle: &str) -> Vec<Range> {
