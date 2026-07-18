@@ -241,13 +241,22 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let offset = doc.line_index.offset_for_position(&doc.text, position);
-        let Some(range) = index.definition_at(offset) else {
+        let ranges = index.definitions_at(offset);
+        if ranges.is_empty() {
             return Ok(None);
-        };
-        Ok(Some(GotoDefinitionResponse::Scalar(Location {
-            uri,
-            range: lsp_range(&doc, range),
-        })))
+        }
+        let locations: Vec<_> = ranges
+            .into_iter()
+            .map(|range| Location {
+                uri: uri.clone(),
+                range: lsp_range(&doc, range),
+            })
+            .collect();
+        Ok(Some(if locations.len() == 1 {
+            GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap())
+        } else {
+            GotoDefinitionResponse::Array(locations)
+        }))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {

@@ -65,12 +65,37 @@ struct Occurrence {
     access: AccessKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum NamedKind {
+    Macro,
+    Parameter,
+}
+
+#[derive(Debug)]
+struct NamedBinding {
+    kind: NamedKind,
+    name: String,
+    scope: usize,
+    occurrences: Vec<usize>,
+    definitions: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct NamedOccurrence {
+    binding: usize,
+    range: ByteRange,
+    access: AccessKind,
+}
+
 #[derive(Debug)]
 pub(super) struct SymbolIndex {
     scopes: Vec<Scope>,
     bindings: Vec<Binding>,
     scope_bindings: Vec<HashMap<(SymbolKind, String), usize>>,
     occurrences: Vec<Occurrence>,
+    named_bindings: Vec<NamedBinding>,
+    named_scope_bindings: Vec<HashMap<(NamedKind, String), usize>>,
+    named_occurrences: Vec<NamedOccurrence>,
 }
 
 impl SymbolIndex {
@@ -86,44 +111,93 @@ impl SymbolIndex {
             bindings: Vec::new(),
             scope_bindings: vec![HashMap::new()],
             occurrences: Vec::new(),
+            named_bindings: Vec::new(),
+            named_scope_bindings: vec![HashMap::new()],
+            named_occurrences: Vec::new(),
         };
+        index.predeclare_macros(source, tree.root_node());
         index.walk_node(source, tree.root_node(), 0);
         Some(index)
     }
 
     pub(super) fn prepare_range(&self, offset: usize) -> Option<ByteRange> {
-        self.occurrence_at(offset)
-            .map(|occurrence| occurrence.range)
+        if let Some(occurrence) = self.occurrence_at(offset) {
+            return self.bindings[occurrence.binding]
+                .definition
+                .is_some()
+                .then_some(occurrence.range);
+        }
+        let occurrence = self.named_occurrence_at(offset)?;
+        (!self.named_bindings[occurrence.binding]
+            .definitions
+            .is_empty())
+        .then_some(occurrence.range)
     }
 
-    pub(super) fn definition_at(&self, offset: usize) -> Option<ByteRange> {
-        let occurrence = self.occurrence_at(offset)?;
-        let binding = &self.bindings[occurrence.binding];
-        binding.definition.map(|idx| self.occurrences[idx].range)
+    #[cfg(test)]
+    fn definition_at(&self, offset: usize) -> Option<ByteRange> {
+        self.definitions_at(offset).into_iter().next()
+    }
+
+    pub(super) fn definitions_at(&self, offset: usize) -> Vec<ByteRange> {
+        if let Some(occurrence) = self.occurrence_at(offset) {
+            let binding = &self.bindings[occurrence.binding];
+            return binding
+                .definition
+                .map(|idx| vec![self.occurrences[idx].range])
+                .unwrap_or_default();
+        }
+        let Some(occurrence) = self.named_occurrence_at(offset) else {
+            return Vec::new();
+        };
+        self.named_bindings[occurrence.binding]
+            .definitions
+            .iter()
+            .map(|idx| self.named_occurrences[*idx].range)
+            .collect()
     }
 
     pub(super) fn references_at(&self, offset: usize, include_declaration: bool) -> Vec<ByteRange> {
-        let Some(occurrence) = self.occurrence_at(offset) else {
+        if let Some(occurrence) = self.occurrence_at(offset) {
+            let binding = &self.bindings[occurrence.binding];
+            return binding
+                .occurrences
+                .iter()
+                .filter(|idx| include_declaration || Some(**idx) != binding.definition)
+                .map(|idx| self.occurrences[*idx].range)
+                .collect();
+        }
+        let Some(occurrence) = self.named_occurrence_at(offset) else {
             return Vec::new();
         };
-        let binding = &self.bindings[occurrence.binding];
+        let binding = &self.named_bindings[occurrence.binding];
         binding
             .occurrences
             .iter()
-            .filter(|idx| include_declaration || Some(**idx) != binding.definition)
-            .map(|idx| self.occurrences[*idx].range)
+            .filter(|idx| include_declaration || !binding.definitions.contains(idx))
+            .map(|idx| self.named_occurrences[*idx].range)
             .collect()
     }
 
     pub(super) fn highlights_at(&self, offset: usize) -> Vec<(ByteRange, AccessKind)> {
-        let Some(occurrence) = self.occurrence_at(offset) else {
+        if let Some(occurrence) = self.occurrence_at(offset) {
+            return self.bindings[occurrence.binding]
+                .occurrences
+                .iter()
+                .map(|idx| {
+                    let occurrence = &self.occurrences[*idx];
+                    (occurrence.range, occurrence.access)
+                })
+                .collect();
+        }
+        let Some(occurrence) = self.named_occurrence_at(offset) else {
             return Vec::new();
         };
-        self.bindings[occurrence.binding]
+        self.named_bindings[occurrence.binding]
             .occurrences
             .iter()
             .map(|idx| {
-                let occurrence = &self.occurrences[*idx];
+                let occurrence = &self.named_occurrences[*idx];
                 (occurrence.range, occurrence.access)
             })
             .collect()
@@ -135,7 +209,7 @@ impl SymbolIndex {
         new_name: &str,
     ) -> Result<Option<RenameResult>, String> {
         let Some(occurrence) = self.occurrence_at(offset) else {
-            return Ok(None);
+            return self.rename_named_at(offset, new_name);
         };
         let binding = &self.bindings[occurrence.binding];
         let name = normalize_name(new_name, binding.kind)?;
@@ -171,6 +245,52 @@ impl SymbolIndex {
             .min_by_key(|occurrence| occurrence.range.end - occurrence.range.start)
     }
 
+    fn named_occurrence_at(&self, offset: usize) -> Option<&NamedOccurrence> {
+        self.named_occurrences
+            .iter()
+            .filter(|occurrence| occurrence.range.start <= offset && offset <= occurrence.range.end)
+            .min_by_key(|occurrence| occurrence.range.end - occurrence.range.start)
+    }
+
+    fn rename_named_at(
+        &self,
+        offset: usize,
+        new_name: &str,
+    ) -> Result<Option<RenameResult>, String> {
+        let Some(occurrence) = self.named_occurrence_at(offset) else {
+            return Ok(None);
+        };
+        let binding = &self.named_bindings[occurrence.binding];
+        if binding.definitions.is_empty() {
+            return Ok(None);
+        }
+        let name = new_name.trim();
+        if !valid_identifier(name) {
+            return Err(format!("invalid rename target {new_name:?}"));
+        }
+        if self
+            .named_bindings
+            .iter()
+            .enumerate()
+            .any(|(idx, candidate)| {
+                idx != occurrence.binding
+                    && candidate.kind == binding.kind
+                    && candidate.scope == binding.scope
+                    && candidate.name == name
+            })
+        {
+            return Err(format!("rename target {name} already exists in this scope"));
+        }
+        Ok(Some(RenameResult {
+            replacement: name.to_string(),
+            ranges: binding
+                .occurrences
+                .iter()
+                .map(|idx| self.named_occurrences[*idx].range)
+                .collect(),
+        }))
+    }
+
     fn walk_node(&mut self, source: &str, node: Node<'_>, scope: usize) {
         match node.kind() {
             "macro_definition" => {
@@ -184,6 +304,14 @@ impl SymbolIndex {
                                 child,
                                 macro_scope,
                                 Some(AccessKind::Declaration),
+                            );
+                        } else if child.kind() == "identifier" {
+                            self.record_named(
+                                source,
+                                child,
+                                macro_scope,
+                                NamedKind::Parameter,
+                                AccessKind::Declaration,
                             );
                         }
                     }
@@ -210,6 +338,7 @@ impl SymbolIndex {
             "scratch_variable" | "map_variable" => {
                 self.record_variable(source, node, scope, None);
             }
+            "identifier" => self.record_identifier(source, node, scope),
             _ => {}
         }
         self.walk_children(source, node, scope);
@@ -240,6 +369,87 @@ impl SymbolIndex {
             }
         }
         self.walk_children(source, body, body_scope);
+    }
+
+    fn predeclare_macros(&mut self, source: &str, root: Node<'_>) {
+        let mut cursor = root.walk();
+        for node in root.named_children(&mut cursor) {
+            if node.kind() != "macro_definition" {
+                continue;
+            }
+            let Some(name) = node.child_by_field_name("name") else {
+                continue;
+            };
+            self.record_named(source, name, 0, NamedKind::Macro, AccessKind::Declaration);
+        }
+    }
+
+    fn record_identifier(&mut self, source: &str, node: Node<'_>, scope: usize) {
+        if node
+            .parent()
+            .is_some_and(|parent| parent.kind() == "macro_definition")
+        {
+            return;
+        }
+        let Some(name) = source.get(node.byte_range()) else {
+            return;
+        };
+        if let Some(binding) = self.resolve_named_binding(scope, NamedKind::Parameter, name) {
+            self.push_named_occurrence(binding, node, AccessKind::Read);
+            return;
+        }
+        let is_call = node.parent().is_some_and(|parent| {
+            parent.kind() == "call_expression" && field_matches(parent, "function", node)
+        });
+        let is_expression = node.parent().is_some_and(|parent| {
+            !matches!(
+                parent.kind(),
+                "config_assignment" | "probe" | "struct_type" | "field_expression"
+            )
+        });
+        if (is_call || is_expression) && in_executable_context(node) {
+            if let Some(binding) = self.named_scope_bindings[0]
+                .get(&(NamedKind::Macro, name.to_string()))
+                .copied()
+            {
+                self.push_named_occurrence(binding, node, AccessKind::Read);
+            }
+        }
+    }
+
+    fn record_named(
+        &mut self,
+        source: &str,
+        node: Node<'_>,
+        scope: usize,
+        kind: NamedKind,
+        access: AccessKind,
+    ) {
+        let Some(name) = source.get(node.byte_range()) else {
+            return;
+        };
+        if !valid_identifier(name) {
+            return;
+        }
+        let binding = self.named_binding_in_scope(scope, kind, name);
+        self.push_named_occurrence(binding, node, access);
+    }
+
+    fn push_named_occurrence(&mut self, binding: usize, node: Node<'_>, access: AccessKind) {
+        let occurrence = self.named_occurrences.len();
+        self.named_occurrences.push(NamedOccurrence {
+            binding,
+            range: ByteRange {
+                start: node.start_byte(),
+                end: node.end_byte(),
+            },
+            access,
+        });
+        let binding = &mut self.named_bindings[binding];
+        binding.occurrences.push(occurrence);
+        if access == AccessKind::Declaration {
+            binding.definitions.push(occurrence);
+        }
     }
 
     fn record_variable(
@@ -305,6 +515,7 @@ impl SymbolIndex {
             kind: ScopeKind::Lexical,
         });
         self.scope_bindings.push(HashMap::new());
+        self.named_scope_bindings.push(HashMap::new());
         idx
     }
 
@@ -315,6 +526,7 @@ impl SymbolIndex {
             kind: ScopeKind::Macro,
         });
         self.scope_bindings.push(HashMap::new());
+        self.named_scope_bindings.push(HashMap::new());
         idx
     }
 
@@ -334,6 +546,37 @@ impl SymbolIndex {
         });
         self.scope_bindings[scope].insert(key, binding);
         binding
+    }
+
+    fn named_binding_in_scope(&mut self, scope: usize, kind: NamedKind, name: &str) -> usize {
+        let key = (kind, name.to_string());
+        if let Some(binding) = self.named_scope_bindings[scope].get(&key) {
+            return *binding;
+        }
+        let binding = self.named_bindings.len();
+        self.named_bindings.push(NamedBinding {
+            kind,
+            name: name.to_string(),
+            scope,
+            occurrences: Vec::new(),
+            definitions: Vec::new(),
+        });
+        self.named_scope_bindings[scope].insert(key, binding);
+        binding
+    }
+
+    fn resolve_named_binding(
+        &self,
+        mut scope: usize,
+        kind: NamedKind,
+        name: &str,
+    ) -> Option<usize> {
+        loop {
+            if let Some(binding) = self.named_scope_bindings[scope].get(&(kind, name.to_string())) {
+                return Some(*binding);
+            }
+            scope = self.scopes[scope].parent?;
+        }
     }
 
     fn resolve_binding(&self, mut scope: usize, kind: SymbolKind, name: &str) -> Option<usize> {
@@ -471,6 +714,19 @@ fn same_node(left: Node<'_>, right: Node<'_>) -> bool {
     left.kind() == right.kind()
         && left.start_byte() == right.start_byte()
         && left.end_byte() == right.end_byte()
+}
+
+fn in_executable_context(mut node: Node<'_>) -> bool {
+    while let Some(parent) = node.parent() {
+        if matches!(
+            parent.kind(),
+            "action" | "block" | "block_expression" | "macro_definition"
+        ) {
+            return true;
+        }
+        node = parent;
+    }
+    false
 }
 
 fn is_variable(node: Node<'_>) -> bool {
@@ -662,6 +918,30 @@ mod tests {
             .collect();
 
         assert_eq!(accesses, vec![AccessKind::Write; 4]);
+    }
+
+    #[test]
+    fn macro_families_and_expression_parameters_are_indexed() {
+        let source = concat!(
+            "macro choose(value) { value }\n",
+            "macro choose($value) { $value }\n",
+            "BEGIN { $x = 1; print(choose(1)); print(choose($x)); }\n",
+        );
+        let index = index(source);
+        let first_call = source.find("choose(1)").unwrap();
+        let parameter_read = source.find("value }").unwrap();
+
+        assert_eq!(index.definitions_at(first_call).len(), 2);
+        assert_eq!(index.references_at(first_call, true).len(), 4);
+        assert_eq!(index.references_at(parameter_read, true).len(), 2);
+
+        let rename = index.rename_at(first_call, "select").unwrap().unwrap();
+        assert_eq!(rename.replacement, "select");
+        assert_eq!(rename.ranges.len(), 4);
+
+        let builtin = source.find("print(").unwrap();
+        assert!(index.prepare_range(builtin).is_none());
+        assert!(index.rename_at(builtin, "display").unwrap().is_none());
     }
 
     #[test]
