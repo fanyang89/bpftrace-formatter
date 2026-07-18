@@ -47,6 +47,11 @@ tasks:
     cmds:
       - cargo fmt
 
+  fmt-check:
+    desc: Check Rust formatting
+    cmds:
+      - cargo fmt --all -- --check
+
   lint:
     desc: Run clippy
     cmds:
@@ -60,7 +65,7 @@ tasks:
   check:
     desc: Run all code quality checks (fmt, vet, lint)
     cmds:
-      - task: fmt
+      - task: fmt-check
       - task: vet
       - task: lint
 
@@ -103,7 +108,15 @@ tasks:
     desc: Install dependencies for the VS Code extension
     dir: vscode-extension
     cmds:
-      - npm install
+      - npm ci
+
+  vscode:typecheck:
+    desc: Check VS Code extension types
+    dir: vscode-extension
+    deps:
+      - vscode:install
+    cmds:
+      - npm run typecheck
 
   vscode:build:
     desc: Build the VS Code extension
@@ -111,6 +124,7 @@ tasks:
     deps:
       - vscode:install
     cmds:
+      - npm run typecheck
       - npm run compile
 
   vscode:package:
@@ -134,17 +148,20 @@ tasks:
   # ─────────────────────────────────────────────────────────────
 
   ci:
-    desc: Run all CI checks (format, vet, test)
+    desc: Run all CI checks
     cmds:
-      - task: fmt
+      - task: fmt-check
       - task: vet
+      - task: lint
       - task: test
+      - task: vscode:build
 
   all:
     desc: Build and test everything
     cmds:
       - task: build
       - task: test
+      - task: vscode:build
 
   gh-review:
     desc: Notify bot to review on the current PR

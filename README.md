@@ -18,7 +18,7 @@ A formatter for bpftrace scripts with VS Code integration.
 
 Install the `btfmt-lsp` extension from the [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) page:
 
-1. Download the `.vsix` file for your platform (e.g., `btfmt-lsp-0.0.2@linux-x64.vsix`)
+1. Download the `.vsix` file for your platform (e.g., `btfmt-lsp-0.2.0@linux-x64.vsix`)
 2. In VS Code, press `Ctrl+Shift+P` and run "Extensions: Install from VSIX..."
 3. Select the downloaded file
 

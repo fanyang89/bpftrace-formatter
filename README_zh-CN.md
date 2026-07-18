@@ -18,7 +18,7 @@ bpftrace 脚本格式化工具，支持 VS Code 集成。
 
 从 [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) 页面下载 `btfmt-lsp` 扩展：
 
-1. 下载对应平台的 `.vsix` 文件（如 `btfmt-lsp-0.0.2@linux-x64.vsix`）
+1. 下载对应平台的 `.vsix` 文件（如 `btfmt-lsp-0.2.0@linux-x64.vsix`）
 2. 在 VS Code 中按 `Ctrl+Shift+P`，运行 "Extensions: Install from VSIX..."
 3. 选择下载的文件
 

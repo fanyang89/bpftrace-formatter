@@ -6,7 +6,32 @@ on:
       - 'v*'
 
 jobs:
+  validate-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import tomllib
+
+          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          cargo = tomllib.loads(pathlib.Path("Cargo.toml").read_text())["package"]["version"]
+          extension = json.loads(pathlib.Path("vscode-extension/package.json").read_text())["version"]
+          if cargo != expected or extension != expected:
+              raise SystemExit(
+                  f"release tag {expected!r} does not match Cargo {cargo!r} and extension {extension!r}"
+              )
+          PY
+
   build-binaries:
+    needs: validate-version
     strategy:
       fail-fast: false
       matrix:
@@ -16,7 +41,7 @@ jobs:
             arch: amd64
             vscode_target: linux-x64
             binary_name: btfmt
-          - os: macos-13
+          - os: macos-15-intel
             platform: darwin
             arch: amd64
             vscode_target: darwin-x64
@@ -92,16 +117,22 @@ jobs:
       matrix:
         include:
           - vscode_target: linux-x64
+            binary_name: btfmt
           - vscode_target: darwin-x64
+            binary_name: btfmt
           - vscode_target: darwin-arm64
+            binary_name: btfmt
           - vscode_target: win32-x64
+            binary_name: btfmt.exe
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.18.1'
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
 
       - name: Download binary
         uses: actions/download-artifact@v4
@@ -115,15 +146,27 @@ jobs:
 
       - name: Install dependencies
         working-directory: vscode-extension
-        run: npm install
+        run: npm ci
+
+      - name: Check types
+        working-directory: vscode-extension
+        run: npm run typecheck
 
       - name: Build extension
         working-directory: vscode-extension
         run: npm run vscode:prepublish
 
+      - name: Verify bundled binary
+        working-directory: vscode-extension
+        run: test -f "bin/${{ matrix.binary_name }}"
+
       - name: Package platform-specific extension
         working-directory: vscode-extension
         run: npx vsce package --no-dependencies --target ${{ matrix.vscode_target }}
+
+      - name: Verify extension contents
+        working-directory: vscode-extension
+        run: npx vsce ls | grep -Fx "bin/${{ matrix.binary_name }}"
 
       - name: Find VSIX file
         id: find-vsix
