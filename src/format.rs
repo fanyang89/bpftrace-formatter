@@ -1,6 +1,7 @@
 use crate::config::{BraceStyle, Config};
 use crate::parse;
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TokenKind {
@@ -18,20 +19,28 @@ enum TokenKind {
 struct Token {
     kind: TokenKind,
     text: String,
+    start: usize,
 }
 
 pub fn format_source(source: &str, config: &Config) -> Result<String> {
-    parse::ensure_valid(source)?;
-    let formatted = format_tokens(&tokenize(source), config);
+    let tree = parse::ensure_valid(source)?;
+    let formatted = format_tokens(
+        &tokenize(source),
+        &predicate_starts(tree.root_node()),
+        config,
+    );
     parse::ensure_valid(&formatted).context("formatter produced invalid bpftrace output")?;
     Ok(formatted)
 }
 
-fn format_tokens(tokens: &[Token], config: &Config) -> String {
+fn format_tokens(tokens: &[Token], predicate_starts: &HashSet<usize>, config: &Config) -> String {
     let mut writer = Writer::new(config);
     let mut top_level_block_closed = false;
 
     for (idx, token) in tokens.iter().enumerate() {
+        if predicate_starts.contains(&token.start) {
+            writer.newline();
+        }
         match token.kind {
             TokenKind::Newline => {}
             TokenKind::Shebang => {
@@ -39,7 +48,16 @@ fn format_tokens(tokens: &[Token], config: &Config) -> String {
                 writer.blank_lines(config.line_breaks.empty_lines_after_shebang);
             }
             TokenKind::Preprocessor => writer.write_line_token(&token.text),
-            TokenKind::Comment => writer.write_comment(&token.text),
+            TokenKind::Comment => {
+                if top_level_block_closed
+                    && writer.at_line_start()
+                    && has_following_top_level_item(tokens, idx + 1)
+                {
+                    writer.blank_lines(config.line_breaks.empty_lines_between_probes);
+                    top_level_block_closed = false;
+                }
+                writer.write_comment(&token.text);
+            }
             TokenKind::Symbol => match token.text.as_str() {
                 "{" => {
                     writer.open_block();
@@ -62,7 +80,7 @@ fn format_tokens(tokens: &[Token], config: &Config) -> String {
                     }
                 }
                 "," => writer.comma(),
-                "(" => writer.open_paren(),
+                "(" => writer.open_paren(previous_token_is_keyword(tokens, idx)),
                 ")" => writer.close_paren(),
                 "[" => writer.open_bracket(),
                 "]" => writer.close_bracket(),
@@ -83,10 +101,46 @@ fn format_tokens(tokens: &[Token], config: &Config) -> String {
     writer.finish()
 }
 
+fn predicate_starts(root: tree_sitter::Node<'_>) -> HashSet<usize> {
+    fn collect(node: tree_sitter::Node<'_>, starts: &mut HashSet<usize>) {
+        if node.kind() == "predicate" {
+            starts.insert(node.start_byte());
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            collect(child, starts);
+        }
+    }
+
+    let mut starts = HashSet::new();
+    collect(root, &mut starts);
+    starts
+}
+
 fn next_significant_token(tokens: &[Token], start: usize) -> Option<&Token> {
     tokens[start..]
         .iter()
         .find(|token| !matches!(token.kind, TokenKind::Newline))
+}
+
+fn previous_token_is_keyword(tokens: &[Token], idx: usize) -> bool {
+    tokens[..idx]
+        .iter()
+        .rev()
+        .find(|token| !matches!(token.kind, TokenKind::Newline))
+        .is_some_and(|token| {
+            matches!(
+                token.text.as_str(),
+                "if" | "while" | "for" | "unroll" | "comptime"
+            )
+        })
+}
+
+fn has_following_top_level_item(tokens: &[Token], start: usize) -> bool {
+    tokens[start..]
+        .iter()
+        .find(|token| !matches!(token.kind, TokenKind::Newline | TokenKind::Comment))
+        .is_some_and(|token| matches!(token.kind, TokenKind::Word | TokenKind::String))
 }
 
 fn is_suffix_wildcard(tokens: &[Token], idx: usize) -> bool {
@@ -225,8 +279,11 @@ impl<'a> Writer<'a> {
         self.pending_space = true;
     }
 
-    fn open_paren(&mut self) {
+    fn open_paren(&mut self, space_before: bool) {
         trim_trailing_space(&mut self.out);
+        if space_before && self.line_has_content {
+            self.out.push(' ');
+        }
         self.write_raw("(");
         if self.config.spacing.around_parentheses {
             self.out.push(' ');
@@ -306,11 +363,12 @@ impl<'a> Writer<'a> {
         if self.line_has_content {
             self.newline();
         }
-        for _ in 0..count {
-            if !self.out.ends_with("\n\n") {
-                self.out.push('\n');
-            }
+        while self.out.ends_with('\n') {
+            self.out.pop();
         }
+        self.out.push_str(&"\n".repeat(count + 1));
+        self.line_has_content = false;
+        self.pending_space = false;
     }
 
     fn newline(&mut self) {
@@ -344,7 +402,7 @@ fn tokenize(source: &str) -> Vec<Token> {
     while idx < bytes.len() {
         let byte = bytes[idx];
         if byte == b'\n' {
-            tokens.push(Token::new(TokenKind::Newline, "\n"));
+            tokens.push(Token::new(TokenKind::Newline, "\n", idx));
             idx += 1;
             at_line_start = true;
             continue;
@@ -355,41 +413,41 @@ fn tokenize(source: &str) -> Vec<Token> {
         }
         if at_line_start && source[idx..].starts_with("#!") {
             let end = read_to_line_end(source, idx);
-            tokens.push(Token::new(TokenKind::Shebang, &source[idx..end]));
+            tokens.push(Token::new(TokenKind::Shebang, &source[idx..end], idx));
             idx = end;
             at_line_start = false;
             continue;
         }
         if at_line_start && byte == b'#' {
             let end = read_to_line_end(source, idx);
-            tokens.push(Token::new(TokenKind::Preprocessor, &source[idx..end]));
+            tokens.push(Token::new(TokenKind::Preprocessor, &source[idx..end], idx));
             idx = end;
             at_line_start = false;
             continue;
         }
         if source[idx..].starts_with("//") {
             let end = read_to_line_end(source, idx);
-            tokens.push(Token::new(TokenKind::Comment, &source[idx..end]));
+            tokens.push(Token::new(TokenKind::Comment, &source[idx..end], idx));
             idx = end;
             at_line_start = false;
             continue;
         }
         if matches!(byte, b'\'' | b'\"') {
             let end = read_string(source, idx, byte);
-            tokens.push(Token::new(TokenKind::String, &source[idx..end]));
+            tokens.push(Token::new(TokenKind::String, &source[idx..end], idx));
             idx = end;
             at_line_start = false;
             continue;
         }
         if let Some(op) = read_multi_operator(&source[idx..]) {
-            tokens.push(Token::new(TokenKind::Operator, op));
+            tokens.push(Token::new(TokenKind::Operator, op, idx));
             idx += op.len();
             at_line_start = false;
             continue;
         }
         if is_word_start(byte) {
             let end = read_word(source, idx);
-            tokens.push(Token::new(TokenKind::Word, &source[idx..end]));
+            tokens.push(Token::new(TokenKind::Word, &source[idx..end], idx));
             idx = end;
             at_line_start = false;
             continue;
@@ -400,7 +458,7 @@ fn tokenize(source: &str) -> Vec<Token> {
         } else {
             TokenKind::Symbol
         };
-        tokens.push(Token::new(kind, &source[idx..idx + ch.len_utf8()]));
+        tokens.push(Token::new(kind, &source[idx..idx + ch.len_utf8()], idx));
         idx += ch.len_utf8();
         at_line_start = false;
     }
@@ -409,10 +467,11 @@ fn tokenize(source: &str) -> Vec<Token> {
 }
 
 impl Token {
-    fn new(kind: TokenKind, text: &str) -> Self {
+    fn new(kind: TokenKind, text: &str, start: usize) -> Self {
         Self {
             kind,
             text: text.to_string(),
+            start,
         }
     }
 }

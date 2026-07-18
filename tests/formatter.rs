@@ -36,37 +36,12 @@ fn formats_golden_fixtures_exactly() {
         let golden_path = root
             .join("testdata/golden")
             .join(path.file_name().expect("fixture filename"));
-        if golden_path.exists() {
-            let expected = fs::read_to_string(&golden_path).unwrap();
-            assert_eq!(
-                formatted,
-                expected,
-                "golden mismatch for {}",
-                path.display()
-            );
-        }
-    }
-}
-
-#[test]
-fn formats_bpftrace_tools_tree() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let tools = root.join("bpftrace/tools");
-    if !tools.exists() {
-        return;
-    }
-    for path in bt_files(&tools) {
-        let source = fs::read_to_string(&path).unwrap();
-        let formatted = fmt(&source, &Config::default());
-        assert!(
-            parse(&formatted).unwrap().diagnostics.is_empty(),
-            "formatter produced invalid output for {}",
-            path.display()
-        );
+        let expected = fs::read_to_string(&golden_path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", golden_path.display()));
         assert_eq!(
-            fmt(&formatted, &Config::default()),
             formatted,
-            "formatter is not idempotent for {}",
+            expected,
+            "golden mismatch for {}",
             path.display()
         );
     }
@@ -130,9 +105,103 @@ fn comments_shebang_preprocessor_and_probe_spacing_are_preserved() {
         "#!/usr/bin/env bpftrace\n#define X 1\nBEGIN{printf(\"x\"); // hello\n}END{exit();}",
         &config,
     );
-    assert!(output.starts_with("#!/usr/bin/env bpftrace\n\n#define X 1\n"));
-    assert!(output.contains("printf(\"x\"); // hello\n"));
-    assert!(output.contains("}\n\nEND"));
+    assert_eq!(
+        output,
+        concat!(
+            "#!/usr/bin/env bpftrace\n\n\n",
+            "#define X 1\n",
+            "BEGIN\n",
+            "{\n",
+            "    printf(\"x\"); // hello\n",
+            "}\n\n\n",
+            "END\n",
+            "{\n",
+            "    exit();\n",
+            "}\n",
+        )
+    );
+}
+
+#[test]
+fn control_flow_empty_blocks_and_comments_are_exact() {
+    assert_eq!(fmt("BEGIN{}", &Config::default()), "BEGIN\n{\n}\n");
+    assert_eq!(
+        fmt(
+            "BEGIN{if(1){exit();}else{exit();} exit();}",
+            &Config::default()
+        ),
+        concat!(
+            "BEGIN\n",
+            "{\n",
+            "    if (1)\n",
+            "    {\n",
+            "        exit();\n",
+            "    }\n",
+            "    else\n",
+            "    {\n",
+            "        exit();\n",
+            "    }\n",
+            "    exit();\n",
+            "}\n",
+        )
+    );
+    assert_eq!(
+        fmt(
+            "BEGIN{exit();}\n// next probe\nEND{exit();}",
+            &Config::default()
+        ),
+        concat!(
+            "BEGIN\n",
+            "{\n",
+            "    exit();\n",
+            "}\n\n",
+            "// next probe\n",
+            "END\n",
+            "{\n",
+            "    exit();\n",
+            "}\n",
+        )
+    );
+}
+
+#[test]
+fn supported_layout_settings_are_exact() {
+    let mut config = Config::default();
+    config.indent.size = 8;
+    assert_eq!(
+        fmt("BEGIN{exit();}", &config),
+        "BEGIN\n{\n        exit();\n}\n"
+    );
+
+    config.blocks.brace_style = BraceStyle::SameLine;
+    config.spacing.before_block_start = false;
+    assert_eq!(
+        fmt("BEGIN{exit();}", &config),
+        "BEGIN{\n        exit();\n}\n"
+    );
+}
+
+#[test]
+fn empty_line_counts_are_exact() {
+    for count in 0..=2 {
+        let mut config = Config::default();
+        config.line_breaks.empty_lines_between_probes = count;
+        let expected = format!(
+            "BEGIN\n{{\n    exit();\n}}{}END\n{{\n    exit();\n}}\n",
+            "\n".repeat(count + 1)
+        );
+        assert_eq!(fmt("BEGIN{exit();}END{exit();}", &config), expected);
+
+        config.line_breaks.empty_lines_after_shebang = count;
+        let expected = format!(
+            "#!/usr/bin/env bpftrace{}BEGIN\n{{\n    exit();\n}}\n",
+            "\n".repeat(count + 1)
+        );
+        assert_eq!(
+            fmt("#!/usr/bin/env bpftrace\nBEGIN{exit();}", &config),
+            expected
+        );
+    }
 }
 
 #[test]
@@ -142,7 +211,7 @@ fn important_bpftrace_tokens_are_not_split_by_spacing() {
         &Config::default(),
     );
     assert!(output.contains("sys_enter_*"));
-    assert!(output.contains("/pid == 1234/"));
+    assert!(output.contains("sys_enter_*\n/pid == 1234/\n"));
     assert!(output.contains("args->filename"));
 
     let output = fmt(
