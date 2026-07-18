@@ -172,6 +172,14 @@ def apply_text_edits(text: str, edits):
     return out
 
 
+def offset_to_position(text: str, offset: int):
+    before = text[:offset]
+    return {
+        "line": before.count("\n"),
+        "character": len(before.rsplit("\n", 1)[-1].encode("utf-16-le")) // 2,
+    }
+
+
 def fail(summary, step: str, msg: str, **extra):
     summary["ok"] = False
     summary["failed_step"] = step
@@ -256,7 +264,9 @@ def main():
             init_params = {
                 "processId": None,
                 "rootUri": td_path.absolute().as_uri(),
-                "capabilities": {},
+                "capabilities": {
+                    "workspace": {"workspaceEdit": {"documentChanges": True}}
+                },
                 "clientInfo": {"name": "task-lsp-smoke", "version": "0"},
                 "initializationOptions": {"btfmt": {"configPath": ".btfmt.json"}},
                 "workspaceFolders": [
@@ -269,17 +279,17 @@ def main():
             if "error" in resp:
                 fail(summary, "initialize", "initialize returned error", resp=resp)
             capabilities = (resp.get("result") or {}).get("capabilities") or {}
-            for unsupported in (
+            for supported in (
                 "definitionProvider",
                 "referencesProvider",
                 "documentHighlightProvider",
                 "renameProvider",
             ):
-                if capabilities.get(unsupported):
+                if not capabilities.get(supported):
                     fail(
                         summary,
                         "initialize",
-                        f"unsafe capability is still enabled: {unsupported}",
+                        f"expected capability is not enabled: {supported}",
                         resp=resp,
                     )
             record(summary, "initialize", t0)
@@ -424,6 +434,96 @@ def main():
             if completion_count == 0:
                 fail(summary, "completion", "expected completion items", resp=resp)
             record(summary, "completion", t0, count=completion_count)
+
+            symbol_position = offset_to_position(
+                doc_text_v1, doc_text_v1.index("$target") + 1
+            )
+            rid = lsp.request(
+                "textDocument/definition",
+                {"textDocument": {"uri": doc_uri}, "position": symbol_position},
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            definition = resp.get("result")
+            if "error" in resp or not isinstance(definition, dict):
+                fail(summary, "definition", "expected definition location", resp=resp)
+            record(summary, "definition", t0)
+
+            rid = lsp.request(
+                "textDocument/references",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": symbol_position,
+                    "context": {"includeDeclaration": True},
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            references = resp.get("result")
+            if (
+                "error" in resp
+                or not isinstance(references, list)
+                or len(references) != 2
+            ):
+                fail(summary, "references", "expected two references", resp=resp)
+            record(summary, "references", t0, count=len(references))
+
+            rid = lsp.request(
+                "textDocument/documentHighlight",
+                {"textDocument": {"uri": doc_uri}, "position": symbol_position},
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            highlights = resp.get("result")
+            if (
+                "error" in resp
+                or not isinstance(highlights, list)
+                or len(highlights) != 2
+            ):
+                fail(
+                    summary,
+                    "documentHighlight",
+                    "expected two highlights",
+                    resp=resp,
+                )
+            if {highlight.get("kind") for highlight in highlights} != {2, 3}:
+                fail(
+                    summary,
+                    "documentHighlight",
+                    "expected read and write highlights",
+                    resp=resp,
+                )
+            record(summary, "documentHighlight", t0, count=len(highlights))
+
+            rid = lsp.request(
+                "textDocument/prepareRename",
+                {"textDocument": {"uri": doc_uri}, "position": symbol_position},
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp or not isinstance(resp.get("result"), dict):
+                fail(summary, "prepareRename", "expected rename range", resp=resp)
+            record(summary, "prepareRename", t0)
+
+            rid = lsp.request(
+                "textDocument/rename",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": symbol_position,
+                    "newName": "renamed",
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            changes = (resp.get("result") or {}).get("documentChanges") or []
+            if "error" in resp or len(changes) != 1:
+                fail(
+                    summary, "rename", "expected one versioned document edit", resp=resp
+                )
+            document_edit = changes[0]
+            if document_edit.get("textDocument", {}).get("version") != 1:
+                fail(summary, "rename", "rename edit is not versioned", resp=resp)
+            rename_edits = document_edit.get("edits") or []
+            if len(rename_edits) != 2 or any(
+                edit.get("newText") != "$renamed" for edit in rename_edits
+            ):
+                fail(summary, "rename", "unexpected rename edits", resp=resp)
+            record(summary, "rename", t0, edits=len(rename_edits))
 
             # Trigger diagnostics with invalid syntax.
             doc_text_v2 = 'tracepoint:syscalls:sys_enter_openat { printf("x");\n'

@@ -1,13 +1,16 @@
+mod symbols;
+
+use self::symbols::{AccessKind, ByteRange, SymbolIndex};
 use crate::config::{load_from_base, Config};
 use crate::format::format_source;
 use crate::parse;
-use crate::text::{full_range, identifier_at_position, range_for_offsets};
+use crate::text::{full_range, identifier_at_position, offset_for_position, range_for_offsets};
 use anyhow::Result as AnyResult;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
 use tree_sitter::Tree;
@@ -53,6 +56,7 @@ impl DocumentStore {
 struct ServerState {
     workspace_roots: Vec<PathBuf>,
     config_path: Option<PathBuf>,
+    supports_document_changes: bool,
 }
 
 #[derive(Debug)]
@@ -77,6 +81,7 @@ pub async fn run_server() -> AnyResult<()> {
 #[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let supports_rename = supports_document_changes(&params);
         self.configure_from_initialize(&params);
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -91,6 +96,15 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions::default()),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
+                rename_provider: supports_rename.then(|| {
+                    OneOf::Right(RenameOptions {
+                        prepare_provider: Some(true),
+                        work_done_progress_options: WorkDoneProgressOptions::default(),
+                    })
+                }),
                 ..ServerCapabilities::default()
             },
         })
@@ -209,6 +223,138 @@ impl LanguageServer for Backend {
     async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(completion_items())))
     }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let Some(doc) = self.doc(&uri) else {
+            return Ok(None);
+        };
+        let Some(index) = symbol_index(&doc) else {
+            return Ok(None);
+        };
+        let offset = offset_for_position(&doc.text, position);
+        let Some(range) = index.definition_at(offset) else {
+            return Ok(None);
+        };
+        Ok(Some(GotoDefinitionResponse::Scalar(Location {
+            uri,
+            range: lsp_range(&doc.text, range),
+        })))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let Some(doc) = self.doc(&uri) else {
+            return Ok(Some(Vec::new()));
+        };
+        let Some(index) = symbol_index(&doc) else {
+            return Ok(Some(Vec::new()));
+        };
+        let offset = offset_for_position(&doc.text, position);
+        let locations = index
+            .references_at(offset, params.context.include_declaration)
+            .into_iter()
+            .map(|range| Location {
+                uri: uri.clone(),
+                range: lsp_range(&doc.text, range),
+            })
+            .collect();
+        Ok(Some(locations))
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let Some(doc) = self.doc(&uri) else {
+            return Ok(Some(Vec::new()));
+        };
+        let Some(index) = symbol_index(&doc) else {
+            return Ok(Some(Vec::new()));
+        };
+        let offset = offset_for_position(&doc.text, position);
+        let highlights = index
+            .highlights_at(offset)
+            .into_iter()
+            .map(|(range, access)| DocumentHighlight {
+                range: lsp_range(&doc.text, range),
+                kind: Some(match access {
+                    AccessKind::Read => DocumentHighlightKind::READ,
+                    AccessKind::Write | AccessKind::Declaration => DocumentHighlightKind::WRITE,
+                }),
+            })
+            .collect();
+        Ok(Some(highlights))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let Some(doc) = self.doc(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let Some(index) = symbol_index(&doc) else {
+            return Ok(None);
+        };
+        let offset = offset_for_position(&doc.text, params.position);
+        Ok(index
+            .prepare_range(offset)
+            .map(|range| PrepareRenameResponse::Range(lsp_range(&doc.text, range))))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        if !self
+            .state
+            .lock()
+            .expect("server state poisoned")
+            .supports_document_changes
+        {
+            return Err(Error::invalid_params(
+                "client must support versioned documentChanges for rename",
+            ));
+        }
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let Some(doc) = self.doc(&uri) else {
+            return Ok(None);
+        };
+        let Some(index) = symbol_index(&doc) else {
+            return Ok(None);
+        };
+        let offset = offset_for_position(&doc.text, position);
+        let Some(rename) = index
+            .rename_at(offset, &params.new_name)
+            .map_err(Error::invalid_params)?
+        else {
+            return Ok(None);
+        };
+        let edits = rename
+            .ranges
+            .into_iter()
+            .map(|range| {
+                OneOf::Left(TextEdit {
+                    range: lsp_range(&doc.text, range),
+                    new_text: rename.replacement.clone(),
+                })
+            })
+            .collect();
+        Ok(Some(WorkspaceEdit {
+            changes: None,
+            document_changes: Some(DocumentChanges::Edits(vec![TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier::new(uri, doc.version),
+                edits,
+            }])),
+            change_annotations: None,
+        }))
+    }
 }
 
 impl Backend {
@@ -220,6 +366,7 @@ impl Backend {
             .as_ref()
             .and_then(config_path_setting_from_value)
             .flatten();
+        state.supports_document_changes = supports_document_changes(params);
     }
 
     fn config_for_uri(&self, uri: &Url) -> AnyResult<Config> {
@@ -304,6 +451,24 @@ fn workspace_root_for_document<'a>(
         .filter(|root| document_path.starts_with(root))
         .max_by_key(|root| root.components().count())
         .map(PathBuf::as_path)
+}
+
+fn supports_document_changes(params: &InitializeParams) -> bool {
+    params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.workspace_edit.as_ref())
+        .and_then(|workspace_edit| workspace_edit.document_changes)
+        .unwrap_or(false)
+}
+
+fn symbol_index(doc: &Document) -> Option<SymbolIndex> {
+    SymbolIndex::new(&doc.text, doc.tree.as_ref()?)
+}
+
+fn lsp_range(text: &str, range: ByteRange) -> Range {
+    range_for_offsets(text, range.start, range.end)
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -549,5 +714,20 @@ mod tests {
             true,
         ));
         assert!(store.get(&uri).is_none());
+    }
+
+    #[test]
+    fn rename_requires_versioned_document_change_support() {
+        let mut params = InitializeParams::default();
+        assert!(!supports_document_changes(&params));
+
+        params.capabilities.workspace = Some(WorkspaceClientCapabilities {
+            workspace_edit: Some(WorkspaceEditClientCapabilities {
+                document_changes: Some(true),
+                ..WorkspaceEditClientCapabilities::default()
+            }),
+            ..WorkspaceClientCapabilities::default()
+        });
+        assert!(supports_document_changes(&params));
     }
 }

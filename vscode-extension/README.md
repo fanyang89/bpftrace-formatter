@@ -7,6 +7,7 @@ VS Code extension for formatting bpftrace scripts.
 - Syntax highlighting for `.bt` files
 - Format on save
 - Format document command (`Shift+Alt+F`)
+- Document symbols, variable definitions, references, highlights, and rename
 
 ## Installation
 
