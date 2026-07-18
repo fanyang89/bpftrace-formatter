@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build without publishing
+        required: true
+        default: '0.2.0'
   push:
     tags:
       - 'v*'
@@ -13,7 +19,7 @@ jobs:
 
       - name: Validate release versions
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           python3 - <<'PY'
           import json
@@ -21,7 +27,7 @@ jobs:
           import pathlib
           import tomllib
 
-          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          expected = os.environ["RELEASE_VERSION"].removeprefix("v")
           cargo = tomllib.loads(pathlib.Path("Cargo.toml").read_text())["package"]["version"]
           extension = json.loads(pathlib.Path("vscode-extension/package.json").read_text())["version"]
           if cargo != expected or extension != expected:
@@ -181,11 +187,9 @@ jobs:
           name: vscode-extension-${{ matrix.vscode_target }}
           path: vscode-extension/${{ steps.find-vsix.outputs.vsix_file }}
 
-  publish:
+  assemble-release:
     needs: [build-binaries, build-vscode-extensions]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -206,6 +210,25 @@ jobs:
         run: |
           sha256sum * > checksums.txt
           cat checksums.txt
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: release/*
+
+  publish:
+    if: github.event_name == 'push'
+    needs: assemble-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
