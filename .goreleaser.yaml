@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: btfmt
+
+builds:
+  - skip: true
+
+archives: []
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+  extra_files:
+    - glob: artifacts/release/*
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  extra_files:
+    - glob: artifacts/release/*

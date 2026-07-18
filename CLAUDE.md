@@ -81,6 +81,8 @@ LSP formatting uses an explicit `btfmt.configPath` when provided; otherwise it s
 
 ## Release Notes
 
+Native GitHub Actions runners build binaries and platform-specific VSIX packages. GoReleaser generates checksums and changelog content, then publishes the assembled artifacts for tags matching the versions in `Cargo.toml` and `vscode-extension/package.json`.
+
 Release builds currently publish:
 
 - Linux x64

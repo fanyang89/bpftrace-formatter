@@ -22,6 +22,7 @@ It summarizes the commands and style conventions observed in the codebase.
 - Test (tools fixtures): `task test-tools`
 - Format Rust code: `task fmt`
 - LSP smoke test: `task lsp-smoke`
+- Validate release config: `goreleaser check .goreleaser.yaml`
 
 ### Direct Cargo Commands
 
@@ -119,6 +120,13 @@ It summarizes the commands and style conventions observed in the codebase.
 - Maintain config defaults and JSON field names when adding config options.
 - Keep CLI and LSP formatting behavior consistent where feasible.
 - Avoid committing build outputs such as `target/` or `btfmt`.
+
+## Release Automation
+
+- `.github/workflows/release.yml` builds binaries and platform-specific VSIX packages on native runners.
+- `.goreleaser.yaml` generates checksums and changelog content, then publishes the assembled artifacts.
+- Release tags must match the versions in `Cargo.toml` and `vscode-extension/package.json`.
+- Manual release workflow runs generate an unpublished snapshot artifact bundle.
 
 ## Quick References
 

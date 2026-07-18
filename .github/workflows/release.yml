@@ -187,53 +187,49 @@ jobs:
           name: vscode-extension-${{ matrix.vscode_target }}
           path: vscode-extension/${{ steps.find-vsix.outputs.vsix_file }}
 
-  assemble-release:
+  release:
     needs: [build-binaries, build-vscode-extensions]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: artifacts/downloads
 
       - name: Prepare release files
         run: |
-          mkdir -p release
-          # Copy binary archives
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
-          # Copy all vsix files
-          find artifacts -type f -name "*.vsix" -exec cp {} release/ \;
-          ls -la release/
+          mkdir -p artifacts/release
+          find artifacts/downloads -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" \) -exec cp {} artifacts/release/ \;
+          ls -la artifacts/release/
 
-      - name: Generate checksums
-        working-directory: release
-        run: |
-          sha256sum * > checksums.txt
-          cat checksums.txt
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.17.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build snapshot release bundle
+        if: github.event_name == 'workflow_dispatch'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.17.0
+          args: release --snapshot --clean
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v4
         with:
           name: release-files
-          path: release/*
-
-  publish:
-    if: github.event_name == 'push'
-    needs: assemble-release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download release bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: release-files
-          path: release
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-          generate_release_notes: true
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          path: |
+            artifacts/release/*
+            dist/checksums.txt
