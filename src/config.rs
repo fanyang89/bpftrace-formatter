@@ -1,3 +1,4 @@
+use crate::file_io;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -152,12 +153,24 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
+        self.save_with(path, true)
+    }
+
+    pub fn save_new(&self, path: &Path) -> Result<()> {
+        self.save_with(path, false)
+    }
+
+    fn save_with(&self, path: &Path, overwrite: bool) -> Result<()> {
         self.validate()?;
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
-        let data = serde_json::to_string_pretty(self)?;
-        fs::write(path, data + "\n").with_context(|| format!("writing {}", path.display()))
+        let data = serde_json::to_string_pretty(self)? + "\n";
+        if overwrite && path.exists() {
+            file_io::write_atomic(path, data.as_bytes())
+        } else {
+            file_io::write_new(path, data.as_bytes())
+        }
     }
 }
 

@@ -109,6 +109,7 @@ Options:
   --check                Exit non-zero if input is not formatted
   -generate-config       Generate default configuration file
   -config-output <file>  Output path for generated configuration
+  --force                Overwrite an existing generated configuration
   -version               Show version information
   -help                  Show help message
 ```
@@ -133,6 +134,7 @@ Generate a default configuration file:
 
 ```bash
 btfmt -generate-config
+btfmt -generate-config --force  # overwrite an existing file
 ```
 
 Example `.btfmt.json`:

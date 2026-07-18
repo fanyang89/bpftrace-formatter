@@ -1,4 +1,5 @@
 use crate::config::{load_for_cwd, Config};
+use crate::file_io;
 use crate::format::format_source;
 use crate::lsp;
 use anyhow::{Context, Result};
@@ -7,7 +8,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 
 #[derive(Debug, Parser)]
 #[command(name = "btfmt", version, about = "Format bpftrace scripts")]
@@ -35,6 +35,9 @@ struct Cli {
 
     #[arg(long = "generate-config")]
     generate_config: bool,
+
+    #[arg(long = "force", requires = "generate_config")]
+    force: bool,
 
     #[arg(long = "config-output", default_value = ".btfmt.json")]
     config_output: PathBuf,
@@ -69,7 +72,18 @@ pub async fn run() -> Result<()> {
     }
 
     if cli.generate_config {
-        Config::default().save(&cli.config_output)?;
+        let config = Config::default();
+        if cli.force {
+            config.save(&cli.config_output)?;
+        } else {
+            if cli.config_output.exists() {
+                anyhow::bail!(
+                    "configuration already exists at {}; use --force to overwrite it",
+                    cli.config_output.display()
+                );
+            }
+            config.save_new(&cli.config_output)?;
+        }
         println!(
             "Generated default configuration at: {}",
             cli.config_output.display()
@@ -126,7 +140,7 @@ pub async fn run() -> Result<()> {
             }
         } else if write_to_file {
             if changed {
-                write_atomic(&input.path, input.formatted.as_bytes())?;
+                file_io::write_atomic(&input.path, input.formatted.as_bytes())?;
             }
         } else {
             let mut stdout = io::stdout().lock();
@@ -151,6 +165,7 @@ fn normalized_args() -> Vec<OsString> {
             "-config" => OsString::from("--config"),
             "-generate-config" => OsString::from("--generate-config"),
             "-config-output" => OsString::from("--config-output"),
+            "-force" => OsString::from("--force"),
             "-verbose" => OsString::from("--verbose"),
             "-version" => OsString::from("--version"),
             "-help" => OsString::from("--help"),
@@ -182,33 +197,6 @@ fn read_input(path: &Path) -> Result<String> {
     } else {
         fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
     }
-}
-
-fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
-    let target = if fs::symlink_metadata(path)?.file_type().is_symlink() {
-        fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?
-    } else {
-        path.to_path_buf()
-    };
-    let metadata = fs::metadata(&target)?;
-    let parent = target
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let mut temp = NamedTempFile::new_in(parent)
-        .with_context(|| format!("creating temporary file in {}", parent.display()))?;
-    temp.as_file()
-        .set_permissions(metadata.permissions())
-        .with_context(|| format!("preserving permissions for {}", target.display()))?;
-    temp.write_all(contents)
-        .with_context(|| format!("writing temporary file for {}", target.display()))?;
-    temp.as_file()
-        .sync_all()
-        .with_context(|| format!("syncing temporary file for {}", target.display()))?;
-    temp.persist(&target)
-        .map_err(|err| err.error)
-        .with_context(|| format!("replacing {}", target.display()))?;
-    Ok(())
 }
 
 #[cfg(test)]

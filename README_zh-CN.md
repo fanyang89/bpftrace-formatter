@@ -109,6 +109,7 @@ btfmt [options] <file.bt|-> [file2.bt ...]
   --check                输入未格式化时返回非零状态
   -generate-config       生成默认配置文件
   -config-output <file>  生成配置文件的输出路径
+  --force                覆盖已存在的生成配置
   -version               显示版本信息
   -help                  显示帮助信息
 ```
@@ -133,6 +134,7 @@ btfmt 按以下顺序查找配置：
 
 ```bash
 btfmt -generate-config
+btfmt -generate-config --force  # 覆盖已有文件
 ```
 
 示例 `.btfmt.json`：

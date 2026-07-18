@@ -258,6 +258,43 @@ fn cli_generates_default_config_and_accepts_legacy_flag_names() {
 }
 
 #[test]
+fn cli_generate_config_requires_force_to_overwrite() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("generated.json");
+    fs::write(&path, "keep me\n").unwrap();
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("--generate-config")
+        .arg("--config-output")
+        .arg(&path)
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("already exists").and(predicate::str::contains("--force")),
+        );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "keep me\n");
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("-generate-config")
+        .arg("-force")
+        .arg("-config-output")
+        .arg(&path)
+        .assert()
+        .success();
+    assert!(fs::read_to_string(&path).unwrap().contains("indent"));
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("--force")
+        .arg("input.bt")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required arguments"));
+}
+
+#[test]
 fn cli_uses_explicit_config() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("input.bt");

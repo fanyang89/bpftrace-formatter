@@ -38,6 +38,21 @@ fn save_config_round_trips_and_creates_parent_directory() {
     config.save(&path).unwrap();
     let loaded = Config::load(&path).unwrap();
     assert_eq!(loaded.indent.size, 8);
+
+    config.indent.size = 2;
+    config.save(&path).unwrap();
+    let loaded = Config::load(&path).unwrap();
+    assert_eq!(loaded.indent.size, 2);
+}
+
+#[test]
+fn save_new_refuses_to_overwrite_existing_config() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("existing.json");
+    fs::write(&path, "keep me\n").unwrap();
+
+    assert!(Config::default().save_new(&path).is_err());
+    assert_eq!(fs::read_to_string(path).unwrap(), "keep me\n");
 }
 
 #[test]
