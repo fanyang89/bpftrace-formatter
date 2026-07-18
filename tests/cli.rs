@@ -211,6 +211,35 @@ fn cli_formats_multiple_files() {
 }
 
 #[test]
+fn cli_preflights_all_inputs_before_output_or_write() {
+    let dir = tempdir().unwrap();
+    let valid = dir.path().join("valid.bt");
+    let invalid = dir.path().join("invalid.bt");
+    let valid_source = "BEGIN{exit();}";
+    let invalid_source = "END{exit();";
+    fs::write(&valid, valid_source).unwrap();
+    fs::write(&invalid, invalid_source).unwrap();
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("-w")
+        .arg(&valid)
+        .arg(&invalid)
+        .assert()
+        .failure();
+    assert_eq!(fs::read_to_string(&valid).unwrap(), valid_source);
+    assert_eq!(fs::read_to_string(&invalid).unwrap(), invalid_source);
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg(&valid)
+        .arg(&invalid)
+        .assert()
+        .failure()
+        .stdout("");
+}
+
+#[test]
 fn cli_generates_default_config_and_accepts_legacy_flag_names() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("generated.json");

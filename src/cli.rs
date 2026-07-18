@@ -48,6 +48,20 @@ enum Command {
     Lsp,
 }
 
+#[derive(Debug)]
+struct FormattedInput {
+    path: PathBuf,
+    label: String,
+    source: String,
+    formatted: String,
+}
+
+impl FormattedInput {
+    fn changed(&self) -> bool {
+        self.formatted != self.source
+    }
+}
+
 pub async fn run() -> Result<()> {
     let cli = Cli::parse_from(normalized_args());
     if matches!(cli.command, Some(Command::Lsp)) {
@@ -77,7 +91,7 @@ pub async fn run() -> Result<()> {
         anyhow::bail!("cannot write stdin in place");
     }
 
-    let mut check_failures = Vec::new();
+    let mut inputs = Vec::with_capacity(cli.files.len());
     for path in &cli.files {
         let label = input_label(path);
         if cli.verbose {
@@ -86,11 +100,21 @@ pub async fn run() -> Result<()> {
         let source = read_input(path)?;
         let formatted =
             format_source(&source, &config).with_context(|| format!("formatting {label}"))?;
-        let changed = formatted != source;
+        inputs.push(FormattedInput {
+            path: path.clone(),
+            label,
+            source,
+            formatted,
+        });
+    }
+
+    let mut check_failures = Vec::new();
+    for input in &inputs {
+        let changed = input.changed();
 
         if cli.check {
             if changed {
-                check_failures.push(label.clone());
+                check_failures.push(input.label.clone());
             }
             if cli.verbose {
                 let status = if changed {
@@ -98,20 +122,20 @@ pub async fn run() -> Result<()> {
                 } else {
                     "Unchanged"
                 };
-                eprintln!("{status}: {label}");
+                eprintln!("{status}: {}", input.label);
             }
         } else if write_to_file {
             if changed {
-                write_atomic(path, formatted.as_bytes())?;
+                write_atomic(&input.path, input.formatted.as_bytes())?;
             }
         } else {
             let mut stdout = io::stdout().lock();
-            stdout.write_all(formatted.as_bytes())?;
+            stdout.write_all(input.formatted.as_bytes())?;
         }
 
         if cli.verbose && write_to_file {
             let status = if changed { "Formatted" } else { "Unchanged" };
-            eprintln!("{status}: {label}");
+            eprintln!("{status}: {}", input.label);
         }
     }
 
