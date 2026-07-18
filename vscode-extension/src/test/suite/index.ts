@@ -16,11 +16,30 @@ export async function run(): Promise<void> {
 
   const edits = await formattingEdits(document.uri);
   assert.ok(edits.length > 0, 'formatting provider returned no edits');
-  assert.ok(edits[0].newText.includes('BEGIN\n{\n    exit();\n}'));
+  const expected = 'BEGIN\n{\n    exit();\n}\n';
+  assert.strictEqual(applyTextEdits(document, edits), expected);
 
   await vscode.commands.executeCommand('btfmt.restartLsp');
   const restartedEdits = await formattingEdits(document.uri);
   assert.ok(restartedEdits.length > 0, 'formatting failed after LSP restart');
+  assert.strictEqual(applyTextEdits(document, restartedEdits), expected);
+}
+
+function applyTextEdits(
+  document: vscode.TextDocument,
+  edits: readonly vscode.TextEdit[]
+): string {
+  let text = document.getText();
+  const ordered = [...edits].sort(
+    (left, right) =>
+      document.offsetAt(right.range.start) - document.offsetAt(left.range.start)
+  );
+  for (const edit of ordered) {
+    const start = document.offsetAt(edit.range.start);
+    const end = document.offsetAt(edit.range.end);
+    text = text.slice(0, start) + edit.newText + text.slice(end);
+  }
+  return text;
 }
 
 async function formattingEdits(uri: vscode.Uri): Promise<vscode.TextEdit[]> {
