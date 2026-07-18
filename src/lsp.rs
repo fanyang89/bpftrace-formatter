@@ -1,10 +1,11 @@
+mod snapshot;
 mod symbols;
 
-use self::symbols::{AccessKind, ByteRange, SymbolIndex};
+use self::snapshot::DocumentSnapshot;
+use self::symbols::{AccessKind, ByteRange};
 use crate::config::{load_from_base, Config};
 use crate::format::format_source;
-use crate::parse;
-use crate::text::{full_range, identifier_at_position, offset_for_position, range_for_offsets};
+use crate::text::identifier_at_position_with_index;
 use anyhow::Result as AnyResult;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,16 +16,9 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
 use tree_sitter::Tree;
 
-#[derive(Debug, Clone)]
-struct Document {
-    text: String,
-    version: i32,
-    tree: Option<Tree>,
-}
-
 #[derive(Debug, Default)]
 struct DocumentStore {
-    documents: HashMap<Url, Document>,
+    documents: HashMap<Url, Arc<DocumentSnapshot>>,
 }
 
 impl DocumentStore {
@@ -35,7 +29,12 @@ impl DocumentStore {
         }
     }
 
-    fn insert(&mut self, uri: Url, document: Document, require_existing: bool) -> bool {
+    fn insert(
+        &mut self,
+        uri: Url,
+        document: Arc<DocumentSnapshot>,
+        require_existing: bool,
+    ) -> bool {
         if !self.can_accept(&uri, document.version, require_existing) {
             return false;
         }
@@ -47,8 +46,8 @@ impl DocumentStore {
         self.documents.remove(uri);
     }
 
-    fn get(&self, uri: &Url) -> Option<Document> {
-        self.documents.get(uri).cloned()
+    fn get(&self, uri: &Url) -> Option<Arc<DocumentSnapshot>> {
+        self.documents.get(uri).map(Arc::clone)
     }
 }
 
@@ -174,7 +173,7 @@ impl LanguageServer for Backend {
         };
         match format_source(&doc.text, &config) {
             Ok(text) => Ok(Some(vec![TextEdit {
-                range: full_range(&doc.text),
+                range: doc.line_index.full_range(&doc.text),
                 new_text: text,
             }])),
             Err(err) => {
@@ -197,7 +196,9 @@ impl LanguageServer for Backend {
             return Ok(Some(DocumentSymbolResponse::Nested(Vec::new())));
         };
         Ok(Some(DocumentSymbolResponse::Nested(document_symbols(
-            &doc.text, tree,
+            &doc.text,
+            tree,
+            &doc.line_index,
         ))))
     }
 
@@ -207,7 +208,9 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(None);
         };
-        let Some((word, range)) = identifier_at_position(&doc.text, position) else {
+        let Some((word, range)) =
+            identifier_at_position_with_index(&doc.text, &doc.line_index, position)
+        else {
             return Ok(None);
         };
         let value = hover_markdown(&word).unwrap_or_else(|| format!("`{word}`"));
@@ -233,16 +236,16 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(None);
         };
-        let Some(index) = symbol_index(&doc) else {
+        let Some(index) = doc.symbols.as_ref() else {
             return Ok(None);
         };
-        let offset = offset_for_position(&doc.text, position);
+        let offset = doc.line_index.offset_for_position(&doc.text, position);
         let Some(range) = index.definition_at(offset) else {
             return Ok(None);
         };
         Ok(Some(GotoDefinitionResponse::Scalar(Location {
             uri,
-            range: lsp_range(&doc.text, range),
+            range: lsp_range(&doc, range),
         })))
     }
 
@@ -252,16 +255,16 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(Some(Vec::new()));
         };
-        let Some(index) = symbol_index(&doc) else {
+        let Some(index) = doc.symbols.as_ref() else {
             return Ok(Some(Vec::new()));
         };
-        let offset = offset_for_position(&doc.text, position);
+        let offset = doc.line_index.offset_for_position(&doc.text, position);
         let locations = index
             .references_at(offset, params.context.include_declaration)
             .into_iter()
             .map(|range| Location {
                 uri: uri.clone(),
-                range: lsp_range(&doc.text, range),
+                range: lsp_range(&doc, range),
             })
             .collect();
         Ok(Some(locations))
@@ -276,15 +279,15 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(Some(Vec::new()));
         };
-        let Some(index) = symbol_index(&doc) else {
+        let Some(index) = doc.symbols.as_ref() else {
             return Ok(Some(Vec::new()));
         };
-        let offset = offset_for_position(&doc.text, position);
+        let offset = doc.line_index.offset_for_position(&doc.text, position);
         let highlights = index
             .highlights_at(offset)
             .into_iter()
             .map(|(range, access)| DocumentHighlight {
-                range: lsp_range(&doc.text, range),
+                range: lsp_range(&doc, range),
                 kind: Some(match access {
                     AccessKind::Read => DocumentHighlightKind::READ,
                     AccessKind::Write | AccessKind::Declaration => DocumentHighlightKind::WRITE,
@@ -301,13 +304,15 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&params.text_document.uri) else {
             return Ok(None);
         };
-        let Some(index) = symbol_index(&doc) else {
+        let Some(index) = doc.symbols.as_ref() else {
             return Ok(None);
         };
-        let offset = offset_for_position(&doc.text, params.position);
+        let offset = doc
+            .line_index
+            .offset_for_position(&doc.text, params.position);
         Ok(index
             .prepare_range(offset)
-            .map(|range| PrepareRenameResponse::Range(lsp_range(&doc.text, range))))
+            .map(|range| PrepareRenameResponse::Range(lsp_range(&doc, range))))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
@@ -326,10 +331,10 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri) else {
             return Ok(None);
         };
-        let Some(index) = symbol_index(&doc) else {
+        let Some(index) = doc.symbols.as_ref() else {
             return Ok(None);
         };
-        let offset = offset_for_position(&doc.text, position);
+        let offset = doc.line_index.offset_for_position(&doc.text, position);
         let Some(rename) = index
             .rename_at(offset, &params.new_name)
             .map_err(Error::invalid_params)?
@@ -341,7 +346,7 @@ impl LanguageServer for Backend {
             .into_iter()
             .map(|range| {
                 OneOf::Left(TextEdit {
-                    range: lsp_range(&doc.text, range),
+                    range: lsp_range(&doc, range),
                     new_text: rename.replacement.clone(),
                 })
             })
@@ -405,26 +410,10 @@ impl Backend {
             return;
         }
 
-        let (tree, diagnostics) = match parse::parse(&text) {
-            Ok(parsed) => (Some(parsed.tree), parsed.diagnostics),
-            Err(err) => (
-                None,
-                vec![Diagnostic {
-                    range: full_range(&text),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    source: Some("btfmt".to_string()),
-                    message: format!("parse failed: {err:#}"),
-                    ..Diagnostic::default()
-                }],
-            ),
-        };
+        let (document, diagnostics) = DocumentSnapshot::analyze(text, version);
         let inserted = self.docs.lock().expect("document store poisoned").insert(
             uri.clone(),
-            Document {
-                text,
-                version,
-                tree,
-            },
+            document,
             require_existing,
         );
         if !inserted {
@@ -437,7 +426,7 @@ impl Backend {
         }
     }
 
-    fn doc(&self, uri: &Url) -> Option<Document> {
+    fn doc(&self, uri: &Url) -> Option<Arc<DocumentSnapshot>> {
         self.docs.lock().expect("document store poisoned").get(uri)
     }
 }
@@ -463,12 +452,9 @@ fn supports_document_changes(params: &InitializeParams) -> bool {
         .unwrap_or(false)
 }
 
-fn symbol_index(doc: &Document) -> Option<SymbolIndex> {
-    SymbolIndex::new(&doc.text, doc.tree.as_ref()?)
-}
-
-fn lsp_range(text: &str, range: ByteRange) -> Range {
-    range_for_offsets(text, range.start, range.end)
+fn lsp_range(doc: &DocumentSnapshot, range: ByteRange) -> Range {
+    doc.line_index
+        .range_for_offsets(&doc.text, range.start, range.end)
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -502,7 +488,11 @@ fn config_path_setting_from_value(value: &Value) -> Option<Option<PathBuf>> {
     }
 }
 
-fn document_symbols(text: &str, tree: &Tree) -> Vec<DocumentSymbol> {
+fn document_symbols(
+    text: &str,
+    tree: &Tree,
+    line_index: &crate::text::LineIndex,
+) -> Vec<DocumentSymbol> {
     let root = tree.root_node();
     let mut cursor = root.walk();
     root.named_children(&mut cursor)
@@ -516,8 +506,8 @@ fn document_symbols(text: &str, tree: &Tree) -> Vec<DocumentSymbol> {
                 Some(new_document_symbol(
                     name,
                     SymbolKind::EVENT,
-                    range_for_offsets(text, node.start_byte(), node.end_byte()),
-                    range_for_offsets(text, probes.start_byte(), probes.end_byte()),
+                    line_index.range_for_offsets(text, node.start_byte(), node.end_byte()),
+                    line_index.range_for_offsets(text, probes.start_byte(), probes.end_byte()),
                 ))
             }
             "macro_definition" => {
@@ -526,8 +516,12 @@ fn document_symbols(text: &str, tree: &Tree) -> Vec<DocumentSymbol> {
                 Some(new_document_symbol(
                     name,
                     SymbolKind::FUNCTION,
-                    range_for_offsets(text, node.start_byte(), node.end_byte()),
-                    range_for_offsets(text, name_node.start_byte(), name_node.end_byte()),
+                    line_index.range_for_offsets(text, node.start_byte(), node.end_byte()),
+                    line_index.range_for_offsets(
+                        text,
+                        name_node.start_byte(),
+                        name_node.end_byte(),
+                    ),
                 ))
             }
             _ => None,
@@ -608,6 +602,7 @@ fn hover_markdown(word: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parse;
 
     #[test]
     fn document_symbols_follow_action_block_syntax() {
@@ -625,7 +620,8 @@ mod tests {
         );
 
         let tree = parse::ensure_valid(text).unwrap();
-        let symbols = document_symbols(text, &tree);
+        let line_index = crate::text::LineIndex::new(text);
+        let symbols = document_symbols(text, &tree, &line_index);
         assert_eq!(symbols.len(), 2);
         assert_eq!(symbols[0].name, "BEGIN");
         assert_eq!(symbols[1].name, "kprobe:vfs_read*, kprobe:vfs_write*");
@@ -638,7 +634,8 @@ mod tests {
     fn document_symbols_include_macros() {
         let text = "macro add_one(value) { value + 1 }\n";
         let tree = parse::ensure_valid(text).unwrap();
-        let symbols = document_symbols(text, &tree);
+        let line_index = crate::text::LineIndex::new(text);
+        let symbols = document_symbols(text, &tree, &line_index);
 
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "macro add_one");
@@ -670,49 +667,23 @@ mod tests {
     fn document_store_rejects_stale_and_closed_changes() {
         let uri = Url::parse("file:///workspace/script.bt").unwrap();
         let mut store = DocumentStore::default();
-        assert!(store.insert(
-            uri.clone(),
-            Document {
-                text: "v1".to_string(),
-                version: 1,
-                tree: None,
-            },
-            false,
-        ));
-        assert!(store.insert(
-            uri.clone(),
-            Document {
-                text: "v3".to_string(),
-                version: 3,
-                tree: None,
-            },
-            true,
-        ));
+        let snapshot = |text: &str, version| DocumentSnapshot::analyze(text.to_string(), version).0;
+        assert!(store.insert(uri.clone(), snapshot("v1", 1), false,));
+        assert!(store.insert(uri.clone(), snapshot("v3", 3), true,));
         for version in [2, 3] {
             assert!(!store.insert(
                 uri.clone(),
-                Document {
-                    text: format!("stale-{version}"),
-                    version,
-                    tree: None,
-                },
+                snapshot(&format!("stale-{version}"), version),
                 true,
             ));
         }
         let current = store.get(&uri).unwrap();
         assert_eq!(current.version, 3);
-        assert_eq!(current.text, "v3");
+        assert_eq!(current.text.as_ref(), "v3");
+        assert!(Arc::ptr_eq(&current, &store.get(&uri).unwrap()));
 
         store.remove(&uri);
-        assert!(!store.insert(
-            uri.clone(),
-            Document {
-                text: "closed".to_string(),
-                version: 4,
-                tree: None,
-            },
-            true,
-        ));
+        assert!(!store.insert(uri.clone(), snapshot("closed", 4), true,));
         assert!(store.get(&uri).is_none());
     }
 

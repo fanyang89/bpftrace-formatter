@@ -85,6 +85,14 @@ pub fn full_range(text: &str) -> Range {
 
 pub fn identifier_at_position(text: &str, position: Position) -> Option<(String, Range)> {
     let index = LineIndex::new(text);
+    identifier_at_position_with_index(text, &index, position)
+}
+
+pub fn identifier_at_position_with_index(
+    text: &str,
+    index: &LineIndex,
+    position: Position,
+) -> Option<(String, Range)> {
     let offset = index.offset_for_position(text, position);
     let bytes = text.as_bytes();
     if bytes.is_empty() {
