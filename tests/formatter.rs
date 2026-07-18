@@ -24,7 +24,7 @@ fn parses_valid_input_and_reports_invalid_input() {
 #[test]
 fn formats_golden_fixtures_exactly() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for path in bt_files(&root.join("testdata")) {
+    for path in bt_files(&root.join("tests/testdata")) {
         if path
             .components()
             .any(|component| component.as_os_str() == "golden")
@@ -34,7 +34,7 @@ fn formats_golden_fixtures_exactly() {
         let source = fs::read_to_string(&path).unwrap();
         let formatted = fmt(&source, &Config::default());
         let golden_path = root
-            .join("testdata/golden")
+            .join("tests/testdata/golden")
             .join(path.file_name().expect("fixture filename"));
         let expected = fs::read_to_string(&golden_path)
             .unwrap_or_else(|err| panic!("read {}: {err}", golden_path.display()));

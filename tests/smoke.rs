@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 fn formats_testdata_fixtures() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let config = Config::default();
-    for path in bt_files(&root.join("testdata")) {
+    for path in bt_files(&root.join("tests/testdata")) {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
         let formatted = format_source(&source, &config)

@@ -52,8 +52,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 - `src/lsp.rs`: tower-lsp server implementation
 - `src/text.rs`: byte offset and LSP range helpers
 - `tests/`: integration tests for CLI, config, formatter, LSP, and text helpers
-- `testdata/`: formatter fixtures
-- `testdata/golden/`: expected Rust formatter output
+- `tests/testdata/`: formatter fixtures
+- `tests/testdata/golden/`: expected Rust formatter output
 
 ## Parser Policy
 
@@ -77,7 +77,7 @@ LSP formatting uses an explicit `btfmt.configPath` when provided; otherwise it s
 - Unit tests cover small helpers and formatter basics.
 - Integration tests cover config, CLI, formatter golden output, text ranges, and LSP smoke behavior.
 - `tests/lsp_smoke.rs` runs `scripts/lsp_smoke.py` against a Cargo-built binary.
-- `tests/formatter.rs` verifies exact golden output for `testdata/*.bt` and smoke-formats `bpftrace/tools`.
+- `tests/formatter.rs` verifies exact golden output for `tests/testdata/*.bt` and smoke-formats `bpftrace/tools`.
 
 ## Release Notes
 

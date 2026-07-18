@@ -54,8 +54,8 @@ It summarizes the commands and style conventions observed in the codebase.
 - `src/parse.rs`: tree-sitter parsing and diagnostics
 - `src/text.rs`: text offset/range helpers
 - `tests/`: Rust integration tests
-- `testdata/`: input fixtures
-- `testdata/golden/`: expected Rust formatter output
+- `tests/testdata/`: input fixtures
+- `tests/testdata/golden/`: expected Rust formatter output
 - `bpftrace/tools/`: upstream bpftrace tool scripts for acceptance tests
 - `vscode-extension/`: VS Code extension client
 
@@ -79,7 +79,7 @@ It summarizes the commands and style conventions observed in the codebase.
 
 - Unit tests may live beside Rust modules.
 - Integration tests live in `tests/*.rs`.
-- Golden tests read fixtures from `testdata/` and compare to `testdata/golden/`.
+- Golden tests read fixtures from `tests/testdata/` and compare to `tests/testdata/golden/`.
 - Acceptance tests parse/format files under `bpftrace/tools`.
 - LSP behavior is covered by `tests/lsp_smoke.rs`, which runs `scripts/lsp_smoke.py` against the Cargo-built binary.
 
