@@ -2,7 +2,7 @@
   "name": "btfmt-lsp",
   "displayName": "btfmt LSP",
   "description": "bpftrace formatter LSP client for VS Code",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "local",
   "repository": {
     "url": "https://github.com/fanyang89/bpftrace-formatter.git"
