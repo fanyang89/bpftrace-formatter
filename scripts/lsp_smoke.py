@@ -202,6 +202,10 @@ def main():
             td_path = pathlib.Path(td)
             doc_path = td_path / "smoke.bt"
             config_path = td_path / ".btfmt.json"
+            second_root = td_path / "second"
+            second_root.mkdir()
+            second_doc_path = second_root / "smoke.bt"
+            second_config_path = second_root / ".btfmt.json"
             env = os.environ.copy()
             # Make smoke deterministic: avoid picking up user/global configs.
             env["HOME"] = str(td_path)
@@ -212,6 +216,7 @@ def main():
                 (pathlib.Path.cwd() / "btfmt").resolve()
             )
             config_path.write_text('{"indent":{"size":2}}\n', encoding="utf-8")
+            second_config_path.write_text('{"indent":{"size":6}}\n', encoding="utf-8")
 
             # Intentionally unformatted input.
             doc_text_v1 = (
@@ -220,6 +225,9 @@ def main():
             )
             doc_path.write_text(doc_text_v1, encoding="utf-8")
             doc_uri = doc_path.absolute().as_uri()
+            second_doc_text = "BEGIN{exit();}\n"
+            second_doc_path.write_text(second_doc_text, encoding="utf-8")
+            second_doc_uri = second_doc_path.absolute().as_uri()
 
             cli = subprocess.run(
                 [btfmt_path, str(doc_path)],
@@ -252,7 +260,8 @@ def main():
                 "clientInfo": {"name": "task-lsp-smoke", "version": "0"},
                 "initializationOptions": {"btfmt": {"configPath": ".btfmt.json"}},
                 "workspaceFolders": [
-                    {"uri": td_path.absolute().as_uri(), "name": "btfmt-lsp-smoke"}
+                    {"uri": td_path.absolute().as_uri(), "name": "btfmt-lsp-smoke"},
+                    {"uri": second_root.absolute().as_uri(), "name": "second"},
                 ],
             }
             rid = lsp.request("initialize", init_params)
@@ -322,6 +331,44 @@ def main():
                 edits=len(edits),
                 bytes=len(lsp_formatted.encode("utf-8")),
             )
+
+            lsp.notify(
+                "textDocument/didOpen",
+                {
+                    "textDocument": {
+                        "uri": second_doc_uri,
+                        "languageId": "bpftrace",
+                        "version": 1,
+                        "text": second_doc_text,
+                    }
+                },
+            )
+            rid = lsp.request(
+                "textDocument/formatting",
+                {
+                    "textDocument": {"uri": second_doc_uri},
+                    "options": {"tabSize": 4, "insertSpaces": True},
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(
+                    summary,
+                    "multi_root_formatting",
+                    "formatting returned error",
+                    resp=resp,
+                )
+            second_formatted = apply_text_edits(
+                second_doc_text, resp.get("result") or []
+            )
+            if "\n      exit();" not in second_formatted:
+                fail(
+                    summary,
+                    "multi_root_formatting",
+                    "second workspace config was not applied",
+                    formatted=second_formatted,
+                )
+            record(summary, "multi_root_formatting", t0)
 
             rid = lsp.request(
                 "textDocument/hover",

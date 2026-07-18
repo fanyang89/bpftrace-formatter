@@ -186,28 +186,23 @@ impl Backend {
     }
 
     fn config_for_uri(&self, uri: &Url) -> AnyResult<Config> {
-        let state = self.state.lock().expect("server state poisoned");
-        let document_dir = uri
-            .to_file_path()
-            .ok()
-            .and_then(|path| path.parent().map(Path::to_path_buf));
-        if let Some(config_path) = &state.config_path {
-            if config_path.as_os_str().is_empty() {
-                return Ok(Config::default());
-            }
-            let path = if config_path.is_absolute() {
-                config_path.clone()
-            } else if let Some(root) = state.workspace_roots.first() {
-                root.join(config_path)
-            } else if let Some(dir) = &document_dir {
-                dir.join(config_path)
-            } else {
-                config_path.clone()
-            };
-            if path.exists() {
-                return Config::load(&path);
-            }
-            return Ok(Config::default());
+        let (workspace_roots, config_path) = {
+            let state = self.state.lock().expect("server state poisoned");
+            (state.workspace_roots.clone(), state.config_path.clone())
+        };
+        let document_path = uri.to_file_path().ok();
+        let document_dir = document_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
+        if let Some(config_path) = config_path {
+            let base_dir = document_path
+                .as_deref()
+                .and_then(|path| workspace_root_for_document(&workspace_roots, path))
+                .map(Path::to_path_buf)
+                .or_else(|| document_dir.clone())
+                .unwrap_or_else(|| PathBuf::from("."));
+            return load_from_base(&base_dir, Some(&config_path));
         }
 
         if let Some(dir) = document_dir {
@@ -244,6 +239,17 @@ impl Backend {
             .get(uri)
             .cloned()
     }
+}
+
+fn workspace_root_for_document<'a>(
+    workspace_roots: &'a [PathBuf],
+    document_path: &Path,
+) -> Option<&'a Path> {
+    workspace_roots
+        .iter()
+        .filter(|root| document_path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .map(PathBuf::as_path)
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -419,5 +425,26 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "macro add_one");
         assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
+    }
+
+    #[test]
+    fn workspace_root_uses_longest_matching_path() {
+        let roots = vec![
+            PathBuf::from("/workspace"),
+            PathBuf::from("/workspace/nested"),
+        ];
+
+        assert_eq!(
+            workspace_root_for_document(&roots, Path::new("/workspace/nested/script.bt")),
+            Some(Path::new("/workspace/nested"))
+        );
+        assert_eq!(
+            workspace_root_for_document(&roots, Path::new("/workspace/other.bt")),
+            Some(Path::new("/workspace"))
+        );
+        assert_eq!(
+            workspace_root_for_document(&roots, Path::new("/outside/script.bt")),
+            None
+        );
     }
 }
