@@ -10,10 +10,43 @@ use std::sync::{Arc, Mutex};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
+use tree_sitter::Tree;
 
 #[derive(Debug, Clone)]
 struct Document {
     text: String,
+    version: i32,
+    tree: Option<Tree>,
+}
+
+#[derive(Debug, Default)]
+struct DocumentStore {
+    documents: HashMap<Url, Document>,
+}
+
+impl DocumentStore {
+    fn can_accept(&self, uri: &Url, version: i32, require_existing: bool) -> bool {
+        match self.documents.get(uri) {
+            Some(current) => version > current.version,
+            None => !require_existing,
+        }
+    }
+
+    fn insert(&mut self, uri: Url, document: Document, require_existing: bool) -> bool {
+        if !self.can_accept(&uri, document.version, require_existing) {
+            return false;
+        }
+        self.documents.insert(uri, document);
+        true
+    }
+
+    fn remove(&mut self, uri: &Url) {
+        self.documents.remove(uri);
+    }
+
+    fn get(&self, uri: &Url) -> Option<Document> {
+        self.documents.get(uri).cloned()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -25,7 +58,7 @@ struct ServerState {
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    docs: Arc<Mutex<HashMap<Url, Document>>>,
+    docs: Arc<Mutex<DocumentStore>>,
     state: Arc<Mutex<ServerState>>,
 }
 
@@ -34,7 +67,7 @@ pub async fn run_server() -> AnyResult<()> {
     let stdout = tokio::io::stdout();
     let (service, socket) = LspService::new(|client| Backend {
         client,
-        docs: Arc::new(Mutex::new(HashMap::new())),
+        docs: Arc::new(Mutex::new(DocumentStore::default())),
         state: Arc::new(Mutex::new(ServerState::default())),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -75,9 +108,9 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
-        let version = Some(params.text_document.version);
+        let version = params.text_document.version;
         let text = params.text_document.text;
-        self.upsert(uri, text, version).await;
+        self.upsert(uri, text, version, false).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -87,7 +120,8 @@ impl LanguageServer for Backend {
         self.upsert(
             params.text_document.uri,
             change.text,
-            Some(params.text_document.version),
+            params.text_document.version,
+            true,
         )
         .await;
     }
@@ -145,8 +179,11 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&params.text_document.uri) else {
             return Ok(Some(DocumentSymbolResponse::Nested(Vec::new())));
         };
+        let Some(tree) = doc.tree.as_ref() else {
+            return Ok(Some(DocumentSymbolResponse::Nested(Vec::new())));
+        };
         Ok(Some(DocumentSymbolResponse::Nested(document_symbols(
-            &doc.text,
+            &doc.text, tree,
         ))))
     }
 
@@ -211,33 +248,50 @@ impl Backend {
         Ok(Config::default())
     }
 
-    async fn upsert(&self, uri: Url, text: String, version: Option<i32>) {
-        let diagnostics = parse::parse(&text)
-            .map(|parsed| parsed.diagnostics)
-            .unwrap_or_else(|err| {
+    async fn upsert(&self, uri: Url, text: String, version: i32, require_existing: bool) {
+        if !self
+            .docs
+            .lock()
+            .expect("document store poisoned")
+            .can_accept(&uri, version, require_existing)
+        {
+            return;
+        }
+
+        let (tree, diagnostics) = match parse::parse(&text) {
+            Ok(parsed) => (Some(parsed.tree), parsed.diagnostics),
+            Err(err) => (
+                None,
                 vec![Diagnostic {
                     range: full_range(&text),
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("btfmt".to_string()),
                     message: format!("parse failed: {err:#}"),
                     ..Diagnostic::default()
-                }]
-            });
-        self.docs
-            .lock()
-            .expect("document store poisoned")
-            .insert(uri.clone(), Document { text });
-        self.client
-            .publish_diagnostics(uri, diagnostics, version)
-            .await;
+                }],
+            ),
+        };
+        let inserted = self.docs.lock().expect("document store poisoned").insert(
+            uri.clone(),
+            Document {
+                text,
+                version,
+                tree,
+            },
+            require_existing,
+        );
+        if !inserted {
+            return;
+        }
+        if self.doc(&uri).is_some_and(|doc| doc.version == version) {
+            self.client
+                .publish_diagnostics(uri, diagnostics, Some(version))
+                .await;
+        }
     }
 
     fn doc(&self, uri: &Url) -> Option<Document> {
-        self.docs
-            .lock()
-            .expect("document store poisoned")
-            .get(uri)
-            .cloned()
+        self.docs.lock().expect("document store poisoned").get(uri)
     }
 }
 
@@ -283,11 +337,8 @@ fn config_path_setting_from_value(value: &Value) -> Option<Option<PathBuf>> {
     }
 }
 
-fn document_symbols(text: &str) -> Vec<DocumentSymbol> {
-    let Ok(parsed) = parse::parse(text) else {
-        return Vec::new();
-    };
-    let root = parsed.tree.root_node();
+fn document_symbols(text: &str, tree: &Tree) -> Vec<DocumentSymbol> {
+    let root = tree.root_node();
     let mut cursor = root.walk();
     root.named_children(&mut cursor)
         .filter_map(|node| match node.kind() {
@@ -408,7 +459,8 @@ mod tests {
             "}\r\n",
         );
 
-        let symbols = document_symbols(text);
+        let tree = parse::ensure_valid(text).unwrap();
+        let symbols = document_symbols(text, &tree);
         assert_eq!(symbols.len(), 2);
         assert_eq!(symbols[0].name, "BEGIN");
         assert_eq!(symbols[1].name, "kprobe:vfs_read*, kprobe:vfs_write*");
@@ -419,8 +471,9 @@ mod tests {
 
     #[test]
     fn document_symbols_include_macros() {
-        let text = "macro add_one(value) { return value + 1; }\n";
-        let symbols = document_symbols(text);
+        let text = "macro add_one(value) { value + 1 }\n";
+        let tree = parse::ensure_valid(text).unwrap();
+        let symbols = document_symbols(text, &tree);
 
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "macro add_one");
@@ -446,5 +499,55 @@ mod tests {
             workspace_root_for_document(&roots, Path::new("/outside/script.bt")),
             None
         );
+    }
+
+    #[test]
+    fn document_store_rejects_stale_and_closed_changes() {
+        let uri = Url::parse("file:///workspace/script.bt").unwrap();
+        let mut store = DocumentStore::default();
+        assert!(store.insert(
+            uri.clone(),
+            Document {
+                text: "v1".to_string(),
+                version: 1,
+                tree: None,
+            },
+            false,
+        ));
+        assert!(store.insert(
+            uri.clone(),
+            Document {
+                text: "v3".to_string(),
+                version: 3,
+                tree: None,
+            },
+            true,
+        ));
+        for version in [2, 3] {
+            assert!(!store.insert(
+                uri.clone(),
+                Document {
+                    text: format!("stale-{version}"),
+                    version,
+                    tree: None,
+                },
+                true,
+            ));
+        }
+        let current = store.get(&uri).unwrap();
+        assert_eq!(current.version, 3);
+        assert_eq!(current.text, "v3");
+
+        store.remove(&uri);
+        assert!(!store.insert(
+            uri.clone(),
+            Document {
+                text: "closed".to_string(),
+                version: 4,
+                tree: None,
+            },
+            true,
+        ));
+        assert!(store.get(&uri).is_none());
     }
 }

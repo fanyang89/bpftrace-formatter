@@ -444,6 +444,13 @@ def main():
                 )
 
             msg = lsp.wait_for(is_publish, timeout_s=10.0)
+            if msg.get("params", {}).get("version") != 2:
+                fail(
+                    summary,
+                    "diagnostics_publish",
+                    "diagnostics version does not match document",
+                    response=msg,
+                )
             diags = msg.get("params", {}).get("diagnostics")
             if not isinstance(diags, list) or len(diags) == 0:
                 fail(
@@ -463,6 +470,13 @@ def main():
                 },
             )
             msg = lsp.wait_for(is_publish, timeout_s=10.0)
+            if msg.get("params", {}).get("version") != 3:
+                fail(
+                    summary,
+                    "diagnostics_clear",
+                    "diagnostics version does not match document",
+                    response=msg,
+                )
             diags = msg.get("params", {}).get("diagnostics")
             # Accept both null and empty list as "no diagnostics"
             if diags is not None and (not isinstance(diags, list) or len(diags) != 0):
@@ -473,6 +487,34 @@ def main():
                     response=msg,
                 )
             record(summary, "diagnostics_clear", t0)
+
+            # A stale full-document update must not replace the latest snapshot.
+            lsp.notify(
+                "textDocument/didChange",
+                {
+                    "textDocument": {"uri": doc_uri, "version": 2},
+                    "contentChanges": [{"text": doc_text_v2}],
+                },
+            )
+            rid = lsp.request(
+                "textDocument/formatting",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "options": {"tabSize": 4, "insertSpaces": True},
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            if "error" in resp:
+                fail(summary, "stale_change", "formatting returned error", resp=resp)
+            stale_result = apply_text_edits(doc_text_v1, resp.get("result") or [])
+            if stale_result != expected_formatted:
+                fail(
+                    summary,
+                    "stale_change",
+                    "stale change replaced latest document snapshot",
+                    formatted=stale_result,
+                )
+            record(summary, "stale_change", t0)
 
             rid = lsp.request("shutdown", None)
             resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
