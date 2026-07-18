@@ -42,6 +42,62 @@ fn cli_write_and_in_place_update_files() {
 }
 
 #[test]
+fn cli_write_preserves_invalid_and_unchanged_files() {
+    let dir = tempdir().unwrap();
+    let invalid = dir.path().join("invalid.bt");
+    let invalid_source = "BEGIN{exit();";
+    fs::write(&invalid, invalid_source).unwrap();
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("-w")
+        .arg(&invalid)
+        .assert()
+        .failure();
+    assert_eq!(fs::read_to_string(&invalid).unwrap(), invalid_source);
+
+    let unchanged = dir.path().join("unchanged.bt");
+    let formatted_source = "BEGIN\n{\n    exit();\n}\n";
+    fs::write(&unchanged, formatted_source).unwrap();
+    let modified = fs::metadata(&unchanged).unwrap().modified().unwrap();
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["-w", "-v"])
+        .arg(&unchanged)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Unchanged:"));
+    assert_eq!(fs::read_to_string(&unchanged).unwrap(), formatted_source);
+    assert_eq!(
+        fs::metadata(&unchanged).unwrap().modified().unwrap(),
+        modified
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_write_preserves_file_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("input.bt");
+    fs::write(&path, "BEGIN{exit();}").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .arg("-w")
+        .arg(&path)
+        .assert()
+        .success();
+    assert_eq!(
+        fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+}
+
+#[test]
 fn cli_formats_multiple_files() {
     let dir = tempdir().unwrap();
     let first = dir.path().join("first.bt");
