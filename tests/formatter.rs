@@ -54,9 +54,16 @@ fn formats_bpftrace_tools_tree() {
     }
     for path in bt_files(&tools) {
         let source = fs::read_to_string(&path).unwrap();
+        let formatted = fmt(&source, &Config::default());
         assert!(
-            !fmt(&source, &Config::default()).trim().is_empty(),
-            "{}",
+            parse(&formatted).unwrap().diagnostics.is_empty(),
+            "formatter produced invalid output for {}",
+            path.display()
+        );
+        assert_eq!(
+            fmt(&formatted, &Config::default()),
+            formatted,
+            "formatter is not idempotent for {}",
             path.display()
         );
     }
@@ -134,6 +141,13 @@ fn important_bpftrace_tokens_are_not_split_by_spacing() {
     assert!(output.contains("sys_enter_*"));
     assert!(output.contains("/pid == 1234/"));
     assert!(output.contains("args->filename"));
+
+    let output = fmt(
+        "kprobe:vfs_read*,kprobe:vfs_write*{exit();}",
+        &Config::default(),
+    );
+    assert!(output.contains("vfs_read*"));
+    assert!(output.contains("vfs_write*"));
 }
 
 #[test]

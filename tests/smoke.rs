@@ -1,5 +1,6 @@
 use btfmt::config::Config;
 use btfmt::format::format_source;
+use btfmt::parse::parse;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,17 @@ fn formats_testdata_fixtures() {
         assert!(
             !formatted.trim().is_empty(),
             "empty output for {}",
+            path.display()
+        );
+        assert!(
+            parse(&formatted).unwrap().diagnostics.is_empty(),
+            "invalid output for {}",
+            path.display()
+        );
+        assert_eq!(
+            format_source(&formatted, &config).unwrap(),
+            formatted,
+            "non-idempotent output for {}",
             path.display()
         );
     }
@@ -37,6 +49,17 @@ fn formats_bpftrace_tools_corpus() {
         assert!(
             !formatted.trim().is_empty(),
             "empty output for {}",
+            path.display()
+        );
+        assert!(
+            parse(&formatted).unwrap().diagnostics.is_empty(),
+            "invalid output for {}",
+            path.display()
+        );
+        assert_eq!(
+            format_source(&formatted, &config).unwrap(),
+            formatted,
+            "non-idempotent output for {}",
             path.display()
         );
     }

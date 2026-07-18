@@ -1,6 +1,6 @@
 use crate::config::{BraceStyle, Config};
 use crate::parse;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TokenKind {
@@ -22,7 +22,9 @@ struct Token {
 
 pub fn format_source(source: &str, config: &Config) -> Result<String> {
     parse::ensure_valid(source)?;
-    Ok(format_tokens(&tokenize(source), config))
+    let formatted = format_tokens(&tokenize(source), config);
+    parse::ensure_valid(&formatted).context("formatter produced invalid bpftrace output")?;
+    Ok(formatted)
 }
 
 fn format_tokens(tokens: &[Token], config: &Config) -> String {
@@ -67,7 +69,7 @@ fn format_tokens(tokens: &[Token], config: &Config) -> String {
                 ":" | "." | "->" => writer.write_raw(&token.text),
                 _ => writer.write_word(&token.text),
             },
-            TokenKind::Operator => writer.operator(&token.text),
+            TokenKind::Operator => writer.operator(&token.text, is_suffix_wildcard(tokens, idx)),
             TokenKind::Word | TokenKind::String => {
                 if top_level_block_closed && writer.at_line_start() {
                     writer.blank_lines(config.line_breaks.empty_lines_between_probes);
@@ -85,6 +87,15 @@ fn next_significant_token(tokens: &[Token], start: usize) -> Option<&Token> {
     tokens[start..]
         .iter()
         .find(|token| !matches!(token.kind, TokenKind::Newline))
+}
+
+fn is_suffix_wildcard(tokens: &[Token], idx: usize) -> bool {
+    if tokens[idx].text != "*" {
+        return false;
+    }
+
+    next_significant_token(tokens, idx + 1)
+        .is_none_or(|next| matches!(next.text.as_str(), "," | "{" | "/"))
 }
 
 struct Writer<'a> {
@@ -178,8 +189,10 @@ impl<'a> Writer<'a> {
         self.write_line_token(text);
     }
 
-    fn operator(&mut self, op: &str) {
-        if matches!(op, "->" | ".." | "/") || (op == "*" && self.out.ends_with(['_', ':', '.'])) {
+    fn operator(&mut self, op: &str, suffix_wildcard: bool) {
+        if matches!(op, "->" | ".." | "/")
+            || (op == "*" && (suffix_wildcard || self.out.ends_with(['_', ':', '.'])))
+        {
             trim_trailing_space(&mut self.out);
             self.write_raw(op);
             self.pending_space = false;
