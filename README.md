@@ -8,7 +8,9 @@ A formatter for bpftrace scripts with VS Code integration.
 
 - Format bpftrace scripts with consistent indentation, spacing, and structure
 - VS Code extension with bundled binary - install and use immediately
-- Language Server Protocol (LSP) support for editor integration
+- Language Server Protocol (LSP) support with hover, completion, navigation, and rename
+- Context-aware completion for builtins, probes, visible variables, maps, and macros
+- Cross-file definitions, references, and rename for imported maps and macro families
 - Configurable formatting rules via JSON configuration file
 - Preserves comments and shebangs
 
@@ -182,7 +184,17 @@ The VS Code extension provides:
 - Syntax highlighting for `.bt` files
 - Format on save (enable in VS Code settings)
 - Format document command (`Shift+Alt+F`)
-- Document symbols, variable definitions, references, highlights, and rename
+- Hover documentation for bpftrace builtins
+- Context-aware completion for builtins, providers, probe targets, keywords, visible variables, maps, macro parameters, and imported macros
+- Document symbols for probes and macros
+- Definitions, references, highlights, and rename for lexical variables, maps, and macro families
+- Workspace-aware navigation and rename across imported `.bt` files
+
+The language server can also be started directly for other LSP clients:
+
+```bash
+btfmt lsp
+```
 
 ### Extension Settings
 
