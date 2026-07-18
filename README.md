@@ -22,7 +22,7 @@ Install [btfmt - bpftrace Language Support](https://marketplace.visualstudio.com
 
 Platform-specific VSIX files are also available from [GitHub Releases](https://github.com/fanyang89/bpftrace-formatter/releases):
 
-1. Download the `.vsix` file for your platform (e.g., `btfmt-0.3.1@linux-x64.vsix`)
+1. Download the `.vsix` file for your platform (for example, Linux x64)
 2. In VS Code, press `Ctrl+Shift+P` and run "Extensions: Install from VSIX..."
 3. Select the downloaded file
 

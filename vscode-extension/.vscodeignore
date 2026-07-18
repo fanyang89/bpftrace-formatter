@@ -3,6 +3,7 @@
 .gitignore
 .nvmrc
 src/**
+scripts/**
 node_modules/**
 out/test/**
 tsconfig.json
@@ -12,3 +13,4 @@ tsconfig.json
 !bin/**
 !images/icon.png
 images/*.svg
+PUBLISHING.md

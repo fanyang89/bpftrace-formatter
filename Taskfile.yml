@@ -131,28 +131,24 @@ tasks:
     desc: Run VS Code Extension Host test
     dir: vscode-extension
     deps:
-      - build
       - vscode:install
     env:
       BTFMT_PATH: ../target/debug/btfmt
     cmds:
+      - cargo build --manifest-path ../Cargo.toml --bin btfmt
       - xvfb-run -a npm test
 
   vscode:package:
-    desc: Package the VS Code extension (vsix)
+    desc: Package a platform-specific VSIX (requires TARGET and BINARY)
     dir: vscode-extension
+    requires:
+      vars:
+        - TARGET
+        - BINARY
     deps:
       - vscode:build
     cmds:
-      - npx vsce package
-
-  vscode:publish:
-    desc: Publish the VS Code extension (requires VSCE_PAT)
-    dir: vscode-extension
-    deps:
-      - vscode:build
-    cmds:
-      - npx vsce publish
+      - node scripts/package.mjs "{{.TARGET}}" "{{.BINARY}}"
 
   # ─────────────────────────────────────────────────────────────
   # CI / Release

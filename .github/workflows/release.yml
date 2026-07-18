@@ -7,6 +7,10 @@ on:
         description: Version to build without publishing
         required: true
         default: '0.3.1'
+      pre_release:
+        description: Package VSIX files for the Marketplace pre-release channel
+        type: boolean
+        default: true
   push:
     tags:
       - 'v*'
@@ -36,8 +40,58 @@ jobs:
               )
           PY
 
-  build-binaries:
+  test:
     needs: validate-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Check Rust
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-targets --all-features
+
+      - name: Check extension
+        working-directory: vscode-extension
+        run: |
+          npm run typecheck
+          npm run compile
+          npx vsce ls --no-dependencies
+
+      - name: Build Extension Host server
+        run: cargo build --bin btfmt
+
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
+
+      - name: Run Extension Host test
+        working-directory: vscode-extension
+        env:
+          BTFMT_PATH: ../target/debug/btfmt
+        run: xvfb-run -a npm test
+
+  build-binaries:
+    needs: [validate-version, test]
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +126,13 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
       - name: Build btfmt
         run: cargo build --release --bin btfmt
 
@@ -103,53 +164,6 @@ jobs:
           name: btfmt-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARCHIVE_NAME }}
 
-      - name: Prepare binary for VS Code extension
-        shell: bash
-        run: |
-          mkdir -p vscode-binary
-          cp "dist/${{ matrix.binary_name }}" vscode-binary/
-
-      - name: Upload binary for VS Code extension
-        uses: actions/upload-artifact@v4
-        with:
-          name: vscode-binary-${{ matrix.vscode_target }}
-          path: vscode-binary/
-
-  build-vscode-extensions:
-    needs: build-binaries
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - vscode_target: linux-x64
-            binary_name: btfmt
-          - vscode_target: darwin-x64
-            binary_name: btfmt
-          - vscode_target: darwin-arm64
-            binary_name: btfmt
-          - vscode_target: win32-x64
-            binary_name: btfmt.exe
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.18.1'
-          cache: npm
-          cache-dependency-path: vscode-extension/package-lock.json
-
-      - name: Download binary
-        uses: actions/download-artifact@v4
-        with:
-          name: vscode-binary-${{ matrix.vscode_target }}
-          path: vscode-extension/bin
-
-      - name: Make binary executable
-        if: matrix.vscode_target != 'win32-x64' && matrix.vscode_target != 'win32-arm64'
-        run: chmod +x vscode-extension/bin/btfmt
-
       - name: Install dependencies
         working-directory: vscode-extension
         run: npm ci
@@ -158,37 +172,25 @@ jobs:
         working-directory: vscode-extension
         run: npm run typecheck
 
-      - name: Build extension
+      - name: Package Marketplace pre-release VSIX
+        if: github.event_name == 'workflow_dispatch' && inputs.pre_release
         working-directory: vscode-extension
-        run: npm run vscode:prepublish
+        run: node scripts/package.mjs "${{ matrix.vscode_target }}" "../target/release/${{ matrix.binary_name }}" pre-release
 
-      - name: Verify bundled binary
+      - name: Package release VSIX
+        if: github.event_name != 'workflow_dispatch' || !inputs.pre_release
         working-directory: vscode-extension
-        run: test -f "bin/${{ matrix.binary_name }}"
-
-      - name: Package platform-specific extension
-        working-directory: vscode-extension
-        run: npx vsce package --no-dependencies --target ${{ matrix.vscode_target }}
-
-      - name: Verify extension contents
-        working-directory: vscode-extension
-        run: npx vsce ls | grep -Fx "bin/${{ matrix.binary_name }}"
-
-      - name: Find VSIX file
-        id: find-vsix
-        working-directory: vscode-extension
-        run: |
-          VSIX_FILE=$(ls *.vsix)
-          echo "vsix_file=${VSIX_FILE}" >> $GITHUB_OUTPUT
+        run: node scripts/package.mjs "${{ matrix.vscode_target }}" "../target/release/${{ matrix.binary_name }}" release
 
       - name: Upload extension artifact
         uses: actions/upload-artifact@v4
         with:
           name: vscode-extension-${{ matrix.vscode_target }}
-          path: vscode-extension/${{ steps.find-vsix.outputs.vsix_file }}
+          path: vscode-extension/*.vsix
+          if-no-files-found: error
 
   release:
-    needs: [build-binaries, build-vscode-extensions]
+    needs: build-binaries
     runs-on: ubuntu-latest
     permissions:
       contents: write

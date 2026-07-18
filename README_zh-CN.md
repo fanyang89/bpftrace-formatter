@@ -22,7 +22,7 @@ bpftrace 脚本格式化工具，支持 VS Code 集成。
 
 也可以从 [GitHub Releases](https://github.com/fanyang89/bpftrace-formatter/releases) 下载对应平台的 VSIX：
 
-1. 下载对应平台的 `.vsix` 文件（如 `btfmt-0.3.1@linux-x64.vsix`）
+1. 下载对应平台的 `.vsix` 文件（如 Linux x64）
 2. 在 VS Code 中按 `Ctrl+Shift+P`，运行 "Extensions: Install from VSIX..."
 3. 选择下载的文件
 

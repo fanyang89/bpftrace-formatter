@@ -22,6 +22,7 @@ It summarizes the commands and style conventions observed in the codebase.
 - Test (tools corpus): `task test-tools`
 - Format Rust code: `task fmt`
 - LSP smoke test: `task lsp-smoke`
+- Package current-platform VSIX: `task vscode:package TARGET=linux-x64 BINARY=../target/release/btfmt`
 - Validate release config: `goreleaser check .goreleaser.yaml`
 
 ### Direct Cargo Commands
@@ -126,7 +127,8 @@ It summarizes the commands and style conventions observed in the codebase.
 - `.github/workflows/release.yml` builds binaries and platform-specific VSIX packages on native runners.
 - `.goreleaser.yaml` generates checksums and changelog content, then publishes the assembled artifacts.
 - Release tags must match the versions in `Cargo.toml` and `vscode-extension/package.json`.
-- Manual release workflow runs generate an unpublished snapshot artifact bundle.
+- Manual release workflow runs generate an unpublished Marketplace pre-release bundle by default.
+- Marketplace publisher ID is `fanyang89`; follow `vscode-extension/PUBLISHING.md` and do not add a long-lived PAT.
 
 ## Quick References
 
