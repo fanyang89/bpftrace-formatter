@@ -240,6 +240,27 @@ fn reproduction_inputs_keep_constructs_parseable() {
     }
 }
 
+#[test]
+fn protected_comments_and_preprocessor_regions_are_preserved() {
+    let source = concat!(
+        "#define SCALE(x) \\\n",
+        "  ((x) * 2)\n",
+        "#ifdef __x86_64__\n",
+        "#define REG ax\n",
+        "#else\n",
+        "#define REG r0\n",
+        "#endif\n",
+        "BEGIN { /* keep this block comment */ printf(\"%d\", SCALE(1)); }\n",
+    );
+    let formatted = fmt(source, &Config::default());
+
+    assert!(formatted.contains("#define SCALE(x) \\\n  ((x) * 2)"));
+    assert!(formatted.contains("#ifdef __x86_64__\n#define REG ax\n#else\n#define REG r0\n#endif"));
+    assert!(formatted.contains("/* keep this block comment */"));
+    assert!(parse(&formatted).unwrap().diagnostics.is_empty());
+    assert_eq!(fmt(&formatted, &Config::default()), formatted);
+}
+
 fn bt_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_bt_files(root, &mut files);

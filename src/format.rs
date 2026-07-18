@@ -1,9 +1,9 @@
 use crate::config::{BraceStyle, Config};
 use crate::parse;
 use anyhow::{Context, Result};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenKind {
     Word,
     String,
@@ -22,23 +22,32 @@ struct Token {
     start: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProtectedSpan {
+    end: usize,
+    kind: TokenKind,
+}
+
+#[derive(Debug, Default)]
+struct FormatHints {
+    predicate_starts: HashSet<usize>,
+    protected_spans: HashMap<usize, ProtectedSpan>,
+}
+
 pub fn format_source(source: &str, config: &Config) -> Result<String> {
     let tree = parse::ensure_valid(source)?;
-    let formatted = format_tokens(
-        &tokenize(source),
-        &predicate_starts(tree.root_node()),
-        config,
-    );
+    let hints = format_hints(tree.root_node());
+    let formatted = format_tokens(&tokenize(source, &hints.protected_spans), &hints, config);
     parse::ensure_valid(&formatted).context("formatter produced invalid bpftrace output")?;
     Ok(formatted)
 }
 
-fn format_tokens(tokens: &[Token], predicate_starts: &HashSet<usize>, config: &Config) -> String {
+fn format_tokens(tokens: &[Token], hints: &FormatHints, config: &Config) -> String {
     let mut writer = Writer::new(config);
     let mut top_level_block_closed = false;
 
     for (idx, token) in tokens.iter().enumerate() {
-        if predicate_starts.contains(&token.start) {
+        if hints.predicate_starts.contains(&token.start) {
             writer.newline();
         }
         match token.kind {
@@ -101,20 +110,43 @@ fn format_tokens(tokens: &[Token], predicate_starts: &HashSet<usize>, config: &C
     writer.finish()
 }
 
-fn predicate_starts(root: tree_sitter::Node<'_>) -> HashSet<usize> {
-    fn collect(node: tree_sitter::Node<'_>, starts: &mut HashSet<usize>) {
-        if node.kind() == "predicate" {
-            starts.insert(node.start_byte());
+fn format_hints(root: tree_sitter::Node<'_>) -> FormatHints {
+    fn collect(node: tree_sitter::Node<'_>, hints: &mut FormatHints) {
+        match node.kind() {
+            "predicate" => {
+                hints.predicate_starts.insert(node.start_byte());
+            }
+            "line_comment" | "block_comment" => {
+                hints.protected_spans.insert(
+                    node.start_byte(),
+                    ProtectedSpan {
+                        end: node.end_byte(),
+                        kind: TokenKind::Comment,
+                    },
+                );
+                return;
+            }
+            "c_preproc" | "c_preproc_block" => {
+                hints.protected_spans.insert(
+                    node.start_byte(),
+                    ProtectedSpan {
+                        end: node.end_byte(),
+                        kind: TokenKind::Preprocessor,
+                    },
+                );
+                return;
+            }
+            _ => {}
         }
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            collect(child, starts);
+            collect(child, hints);
         }
     }
 
-    let mut starts = HashSet::new();
-    collect(root, &mut starts);
-    starts
+    let mut hints = FormatHints::default();
+    collect(root, &mut hints);
+    hints
 }
 
 fn next_significant_token(tokens: &[Token], start: usize) -> Option<&Token> {
@@ -393,13 +425,19 @@ fn trim_trailing_space(out: &mut String) {
     }
 }
 
-fn tokenize(source: &str) -> Vec<Token> {
+fn tokenize(source: &str, protected_spans: &HashMap<usize, ProtectedSpan>) -> Vec<Token> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut idx = 0;
     let mut at_line_start = true;
 
     while idx < bytes.len() {
+        if let Some(span) = protected_spans.get(&idx) {
+            tokens.push(Token::new(span.kind, &source[idx..span.end], idx));
+            at_line_start = source[idx..span.end].ends_with('\n');
+            idx = span.end;
+            continue;
+        }
         let byte = bytes[idx];
         if byte == b'\n' {
             tokens.push(Token::new(TokenKind::Newline, "\n", idx));
