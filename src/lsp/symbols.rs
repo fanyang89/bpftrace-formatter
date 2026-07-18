@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use tree_sitter::{Node, Tree};
 
+use super::catalog;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AccessKind {
     Read,
@@ -18,6 +20,25 @@ pub(super) struct ByteRange {
 pub(super) struct RenameResult {
     pub replacement: String,
     pub ranges: Vec<ByteRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum GlobalSymbolKind {
+    Map,
+    Macro,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct GlobalSymbolTarget {
+    pub kind: GlobalSymbolKind,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GlobalSymbolOccurrence {
+    pub range: ByteRange,
+    pub access: AccessKind,
+    pub definition: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -132,6 +153,88 @@ impl SymbolIndex {
             .definitions
             .is_empty())
         .then_some(occurrence.range)
+    }
+
+    pub(super) fn global_target_at(&self, offset: usize) -> Option<GlobalSymbolTarget> {
+        if let Some(occurrence) = self.occurrence_at(offset) {
+            let binding = &self.bindings[occurrence.binding];
+            if binding.kind == SymbolKind::Map && binding.scope == 0 {
+                return Some(GlobalSymbolTarget {
+                    kind: GlobalSymbolKind::Map,
+                    name: binding.name.clone(),
+                });
+            }
+        }
+        let occurrence = self.named_occurrence_at(offset)?;
+        let binding = &self.named_bindings[occurrence.binding];
+        (binding.kind == NamedKind::Macro && binding.scope == 0).then(|| GlobalSymbolTarget {
+            kind: GlobalSymbolKind::Macro,
+            name: binding.name.clone(),
+        })
+    }
+
+    pub(super) fn global_occurrences(
+        &self,
+        target: &GlobalSymbolTarget,
+    ) -> Vec<GlobalSymbolOccurrence> {
+        match target.kind {
+            GlobalSymbolKind::Map => self
+                .bindings
+                .iter()
+                .find(|binding| {
+                    binding.kind == SymbolKind::Map
+                        && binding.scope == 0
+                        && binding.name == target.name
+                })
+                .map(|binding| {
+                    binding
+                        .occurrences
+                        .iter()
+                        .map(|idx| GlobalSymbolOccurrence {
+                            range: self.occurrences[*idx].range,
+                            access: self.occurrences[*idx].access,
+                            definition: Some(*idx) == binding.definition,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            GlobalSymbolKind::Macro => self
+                .named_bindings
+                .iter()
+                .find(|binding| {
+                    binding.kind == NamedKind::Macro
+                        && binding.scope == 0
+                        && binding.name == target.name
+                })
+                .map(|binding| {
+                    binding
+                        .occurrences
+                        .iter()
+                        .map(|idx| GlobalSymbolOccurrence {
+                            range: self.named_occurrences[*idx].range,
+                            access: self.named_occurrences[*idx].access,
+                            definition: binding.definitions.contains(idx),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(super) fn normalize_global_rename(
+        target: &GlobalSymbolTarget,
+        new_name: &str,
+    ) -> Result<String, String> {
+        match target.kind {
+            GlobalSymbolKind::Map => normalize_name(new_name, SymbolKind::Map),
+            GlobalSymbolKind::Macro => {
+                let name = new_name.trim();
+                if !valid_identifier(name) {
+                    return Err(format!("invalid rename target {new_name:?}"));
+                }
+                Ok(name.to_string())
+            }
+        }
     }
 
     #[cfg(test)]
@@ -412,6 +515,9 @@ impl SymbolIndex {
                 .get(&(NamedKind::Macro, name.to_string()))
                 .copied()
             {
+                self.push_named_occurrence(binding, node, AccessKind::Read);
+            } else if is_call && catalog::find(name).is_none() {
+                let binding = self.named_binding_in_scope(0, NamedKind::Macro, name);
                 self.push_named_occurrence(binding, node, AccessKind::Read);
             }
         }

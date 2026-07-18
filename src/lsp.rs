@@ -1,9 +1,14 @@
 mod catalog;
 mod snapshot;
 mod symbols;
+mod workspace;
 
 use self::snapshot::DocumentSnapshot;
-use self::symbols::{AccessKind, ByteRange};
+use self::symbols::{
+    AccessKind, ByteRange, GlobalSymbolKind, GlobalSymbolOccurrence, GlobalSymbolTarget,
+    SymbolIndex,
+};
+use self::workspace::WorkspaceIndex;
 use crate::config::{load_from_base, Config};
 use crate::format::format_source;
 use crate::text::identifier_at_position_with_index;
@@ -25,7 +30,7 @@ struct DocumentStore {
 impl DocumentStore {
     fn can_accept(&self, uri: &Url, version: i32, require_existing: bool) -> bool {
         match self.documents.get(uri) {
-            Some(current) => version > current.version,
+            Some(current) => current.version.is_some_and(|current| version > current),
             None => !require_existing,
         }
     }
@@ -36,7 +41,10 @@ impl DocumentStore {
         document: Arc<DocumentSnapshot>,
         require_existing: bool,
     ) -> bool {
-        if !self.can_accept(&uri, document.version, require_existing) {
+        let Some(version) = document.version else {
+            return false;
+        };
+        if !self.can_accept(&uri, version, require_existing) {
             return false;
         }
         self.documents.insert(uri, document);
@@ -64,7 +72,13 @@ struct Backend {
     client: Client,
     docs: Arc<Mutex<DocumentStore>>,
     state: Arc<Mutex<ServerState>>,
+    workspace: Arc<Mutex<WorkspaceIndex>>,
 }
+
+type PendingDocumentEdits = (
+    Arc<DocumentSnapshot>,
+    Vec<OneOf<TextEdit, AnnotatedTextEdit>>,
+);
 
 pub async fn run_server() -> AnyResult<()> {
     let stdin = tokio::io::stdin();
@@ -73,6 +87,7 @@ pub async fn run_server() -> AnyResult<()> {
         client,
         docs: Arc::new(Mutex::new(DocumentStore::default())),
         state: Arc::new(Mutex::new(ServerState::default())),
+        workspace: Arc::new(Mutex::new(WorkspaceIndex::default())),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
     Ok(())
@@ -83,14 +98,29 @@ impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         let supports_rename = supports_document_changes(&params);
         self.configure_from_initialize(&params);
+        let roots = self
+            .state
+            .lock()
+            .expect("server state poisoned")
+            .workspace_roots
+            .clone();
+        self.workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .scan(&roots);
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "btfmt".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                        ..TextDocumentSyncOptions::default()
+                    },
                 )),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -104,6 +134,13 @@ impl LanguageServer for Backend {
                         prepare_provider: Some(true),
                         work_done_progress_options: WorkDoneProgressOptions::default(),
                     })
+                }),
+                workspace: Some(WorkspaceServerCapabilities {
+                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                        supported: Some(true),
+                        change_notifications: Some(OneOf::Left(true)),
+                    }),
+                    file_operations: None,
                 }),
                 ..ServerCapabilities::default()
             },
@@ -146,7 +183,51 @@ impl LanguageServer for Backend {
             .lock()
             .expect("document store poisoned")
             .remove(&uri);
+        self.workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .remove_overlay(&uri);
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        self.workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .refresh(&params.text_document.uri);
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let mut workspace = self.workspace.lock().expect("workspace index poisoned");
+        for change in params.changes {
+            match change.typ {
+                FileChangeType::CREATED | FileChangeType::CHANGED => workspace.refresh(&change.uri),
+                FileChangeType::DELETED => workspace.remove_disk(&change.uri),
+                _ => {}
+            }
+        }
+    }
+
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        let mut state = self.state.lock().expect("server state poisoned");
+        for removed in params.event.removed {
+            if let Ok(path) = removed.uri.to_file_path() {
+                state.workspace_roots.retain(|root| root != &path);
+            }
+        }
+        for added in params.event.added {
+            if let Ok(path) = added.uri.to_file_path() {
+                if !state.workspace_roots.contains(&path) {
+                    state.workspace_roots.push(path);
+                }
+            }
+        }
+        let roots = state.workspace_roots.clone();
+        drop(state);
+        self.workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .scan(&roots);
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
@@ -241,6 +322,24 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let offset = doc.line_index.offset_for_position(&doc.text, position);
+        if let Some(target) = index.global_target_at(offset) {
+            let locations: Vec<_> = self
+                .global_occurrences(&uri, &target)
+                .into_iter()
+                .filter(|(_, _, occurrence)| occurrence.definition)
+                .map(|(uri, snapshot, occurrence)| Location {
+                    uri,
+                    range: lsp_range(&snapshot, occurrence.range),
+                })
+                .collect();
+            return Ok(match locations.len() {
+                0 => None,
+                1 => Some(GotoDefinitionResponse::Scalar(
+                    locations.into_iter().next().unwrap(),
+                )),
+                _ => Some(GotoDefinitionResponse::Array(locations)),
+            });
+        }
         let ranges = index.definitions_at(offset);
         if ranges.is_empty() {
             return Ok(None);
@@ -269,6 +368,27 @@ impl LanguageServer for Backend {
             return Ok(Some(Vec::new()));
         };
         let offset = doc.line_index.offset_for_position(&doc.text, position);
+        if let Some(target) = index.global_target_at(offset) {
+            let occurrences = self.global_occurrences(&uri, &target);
+            if target.kind == GlobalSymbolKind::Macro
+                && !occurrences
+                    .iter()
+                    .any(|(_, _, occurrence)| occurrence.definition)
+            {
+                return Ok(Some(Vec::new()));
+            }
+            let locations = occurrences
+                .into_iter()
+                .filter(|(_, _, occurrence)| {
+                    params.context.include_declaration || !occurrence.definition
+                })
+                .map(|(uri, snapshot, occurrence)| Location {
+                    uri,
+                    range: lsp_range(&snapshot, occurrence.range),
+                })
+                .collect();
+            return Ok(Some(locations));
+        }
         let locations = index
             .references_at(offset, params.context.include_declaration)
             .into_iter()
@@ -345,6 +465,11 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let offset = doc.line_index.offset_for_position(&doc.text, position);
+        if let Some(target) = index.global_target_at(offset) {
+            return self
+                .rename_global(&uri, &target, &params.new_name)
+                .map_err(Error::invalid_params);
+        }
         let Some(rename) = index
             .rename_at(offset, &params.new_name)
             .map_err(Error::invalid_params)?
@@ -364,7 +489,10 @@ impl LanguageServer for Backend {
         Ok(Some(WorkspaceEdit {
             changes: None,
             document_changes: Some(DocumentChanges::Edits(vec![TextDocumentEdit {
-                text_document: OptionalVersionedTextDocumentIdentifier::new(uri, doc.version),
+                text_document: OptionalVersionedTextDocumentIdentifier {
+                    uri,
+                    version: doc.version,
+                },
                 edits,
             }])),
             change_annotations: None,
@@ -420,16 +548,23 @@ impl Backend {
             return;
         }
 
-        let (document, diagnostics) = DocumentSnapshot::analyze(text, version);
+        let (document, diagnostics) = DocumentSnapshot::analyze(text, Some(version));
         let inserted = self.docs.lock().expect("document store poisoned").insert(
             uri.clone(),
-            document,
+            Arc::clone(&document),
             require_existing,
         );
         if !inserted {
             return;
         }
-        if self.doc(&uri).is_some_and(|doc| doc.version == version) {
+        self.workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .set_overlay(uri.clone(), document);
+        if self
+            .doc(&uri)
+            .is_some_and(|doc| doc.version == Some(version))
+        {
             self.client
                 .publish_diagnostics(uri, diagnostics, Some(version))
                 .await;
@@ -438,6 +573,114 @@ impl Backend {
 
     fn doc(&self, uri: &Url) -> Option<Arc<DocumentSnapshot>> {
         self.docs.lock().expect("document store poisoned").get(uri)
+    }
+
+    fn effective_snapshot(&self, uri: &Url) -> Option<Arc<DocumentSnapshot>> {
+        self.doc(uri).or_else(|| {
+            self.workspace
+                .lock()
+                .expect("workspace index poisoned")
+                .snapshot(uri)
+        })
+    }
+
+    fn global_occurrences(
+        &self,
+        origin: &Url,
+        target: &GlobalSymbolTarget,
+    ) -> Vec<(Url, Arc<DocumentSnapshot>, GlobalSymbolOccurrence)> {
+        let files = self
+            .workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .program_files(origin);
+        let mut seen = std::collections::HashSet::new();
+        let mut occurrences = Vec::new();
+        for uri in files {
+            let Some(snapshot) = self.effective_snapshot(&uri) else {
+                continue;
+            };
+            let Some(index) = snapshot.symbols.as_ref() else {
+                continue;
+            };
+            for occurrence in index.global_occurrences(target) {
+                if seen.insert((uri.clone(), occurrence.range.start, occurrence.range.end)) {
+                    occurrences.push((uri.clone(), Arc::clone(&snapshot), occurrence));
+                }
+            }
+        }
+        occurrences
+    }
+
+    fn rename_global(
+        &self,
+        origin: &Url,
+        target: &GlobalSymbolTarget,
+        new_name: &str,
+    ) -> std::result::Result<Option<WorkspaceEdit>, String> {
+        if !self
+            .workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .ready_for_rename()
+        {
+            return Err("workspace index is incomplete; cross-file rename is unavailable".into());
+        }
+        let name = SymbolIndex::normalize_global_rename(target, new_name)?;
+        if name != target.name {
+            let collision = GlobalSymbolTarget {
+                kind: target.kind,
+                name: name.clone(),
+            };
+            if !self.global_occurrences(origin, &collision).is_empty() {
+                return Err(format!("rename target {new_name:?} already exists"));
+            }
+        }
+        let replacement = match target.kind {
+            GlobalSymbolKind::Map => format!("@{name}"),
+            GlobalSymbolKind::Macro => name,
+        };
+        let occurrences = self.global_occurrences(origin, target);
+        if occurrences.is_empty()
+            || (target.kind == GlobalSymbolKind::Macro
+                && !occurrences
+                    .iter()
+                    .any(|(_, _, occurrence)| occurrence.definition))
+        {
+            return Ok(None);
+        }
+        let mut by_document: HashMap<Url, PendingDocumentEdits> = HashMap::new();
+        for (uri, snapshot, occurrence) in occurrences {
+            by_document
+                .entry(uri)
+                .or_insert_with(|| (Arc::clone(&snapshot), Vec::new()))
+                .1
+                .push(OneOf::Left(TextEdit {
+                    range: lsp_range(&snapshot, occurrence.range),
+                    new_text: replacement.clone(),
+                }));
+        }
+        let mut edits: Vec<_> = by_document
+            .into_iter()
+            .map(|(uri, (snapshot, edits))| TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier {
+                    uri,
+                    version: snapshot.version,
+                },
+                edits,
+            })
+            .collect();
+        edits.sort_by(|left, right| {
+            left.text_document
+                .uri
+                .as_str()
+                .cmp(right.text_document.uri.as_str())
+        });
+        Ok(Some(WorkspaceEdit {
+            changes: None,
+            document_changes: Some(DocumentChanges::Edits(edits)),
+            change_annotations: None,
+        }))
     }
 }
 
@@ -651,7 +894,8 @@ mod tests {
     fn document_store_rejects_stale_and_closed_changes() {
         let uri = Url::parse("file:///workspace/script.bt").unwrap();
         let mut store = DocumentStore::default();
-        let snapshot = |text: &str, version| DocumentSnapshot::analyze(text.to_string(), version).0;
+        let snapshot =
+            |text: &str, version| DocumentSnapshot::analyze(text.to_string(), Some(version)).0;
         assert!(store.insert(uri.clone(), snapshot("v1", 1), false,));
         assert!(store.insert(uri.clone(), snapshot("v3", 3), true,));
         for version in [2, 3] {
@@ -662,7 +906,7 @@ mod tests {
             ));
         }
         let current = store.get(&uri).unwrap();
-        assert_eq!(current.version, 3);
+        assert_eq!(current.version, Some(3));
         assert_eq!(current.text.as_ref(), "v3");
         assert!(Arc::ptr_eq(&current, &store.get(&uri).unwrap()));
 

@@ -8,14 +8,14 @@ use tree_sitter::Tree;
 #[derive(Debug)]
 pub(super) struct DocumentSnapshot {
     pub text: Arc<str>,
-    pub version: i32,
+    pub version: Option<i32>,
     pub tree: Option<Tree>,
     pub line_index: LineIndex,
     pub symbols: Option<SymbolIndex>,
 }
 
 impl DocumentSnapshot {
-    pub(super) fn analyze(text: String, version: i32) -> (Arc<Self>, Vec<Diagnostic>) {
+    pub(super) fn analyze(text: String, version: Option<i32>) -> (Arc<Self>, Vec<Diagnostic>) {
         let line_index = LineIndex::new(&text);
         let (tree, diagnostics) = match parse::parse(&text) {
             Ok(parsed) => (Some(parsed.tree), parsed.diagnostics),

@@ -43,19 +43,20 @@ function getServerPath(context: vscode.ExtensionContext): string {
 
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = vscode.window.createOutputChannel('btfmt LSP');
-  context.subscriptions.push(outputChannel);
-  startClient(context, outputChannel);
+  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.bt');
+  context.subscriptions.push(outputChannel, fileWatcher);
+  startClient(context, outputChannel, fileWatcher);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('btfmt.restartLsp', () =>
-      restartLsp(context, outputChannel)
+      restartLsp(context, outputChannel, fileWatcher)
     )
   );
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('btfmt.serverPath')) {
-        void restartLsp(context, outputChannel);
+        void restartLsp(context, outputChannel, fileWatcher);
         return;
       }
       if (!client || !event.affectsConfiguration('btfmt.configPath')) {
@@ -70,7 +71,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
 function startClient(
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel
+  outputChannel: vscode.OutputChannel,
+  fileWatcher: vscode.FileSystemWatcher
 ): void {
   const serverPath = getServerPath(context);
   outputChannel.appendLine(`[Info ] Using server path: ${serverPath}`);
@@ -92,7 +94,7 @@ function startClient(
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ language: 'bpftrace' }],
     initializationOptions: { btfmt: buildSettings() },
-    synchronize: { configurationSection: 'btfmt' },
+    synchronize: { configurationSection: 'btfmt', fileEvents: fileWatcher },
     outputChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Error,
     middleware: {
@@ -139,14 +141,15 @@ export function deactivate(): Thenable<void> | undefined {
 
 async function restartLsp(
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel
+  outputChannel: vscode.OutputChannel,
+  fileWatcher: vscode.FileSystemWatcher
 ): Promise<void> {
   const previous = client;
   client = undefined;
   if (previous) {
     await previous.stop();
   }
-  startClient(context, outputChannel);
+  startClient(context, outputChannel, fileWatcher);
 }
 
 function buildSettings(): Record<string, unknown> {

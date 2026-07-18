@@ -209,6 +209,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="btfmt-lsp-smoke-") as td:
             td_path = pathlib.Path(td)
             doc_path = td_path / "smoke.bt"
+            helper_path = td_path / "helper.bt"
             config_path = td_path / ".btfmt.json"
             second_root = td_path / "second"
             second_root.mkdir()
@@ -228,11 +229,15 @@ def main():
 
             # Intentionally unformatted input.
             doc_text_v1 = (
-                'tracepoint:syscalls:sys_enter_openat{$target=1;@opens[$target]=count();printf("openat: %s\\n",str(args.filename));}\n'
+                'import "helper.bt";\n'
+                'tracepoint:syscalls:sys_enter_openat{$target=1;@opens[$target]=count();printf("%d", imported(1));printf("openat: %s\\n",str(args.filename));}\n'
                 'tracepoint:syscalls:sys_enter_openat2{printf("openat2: %s\\n",str(args->filename));}\n'
             )
+            helper_text = "macro imported(value) { value }\n"
             doc_path.write_text(doc_text_v1, encoding="utf-8")
+            helper_path.write_text(helper_text, encoding="utf-8")
             doc_uri = doc_path.absolute().as_uri()
+            helper_uri = helper_path.absolute().as_uri()
             second_doc_text = "BEGIN{exit();}\n"
             second_doc_path.write_text(second_doc_text, encoding="utf-8")
             second_doc_uri = second_doc_path.absolute().as_uri()
@@ -434,6 +439,88 @@ def main():
             if completion_count == 0:
                 fail(summary, "completion", "expected completion items", resp=resp)
             record(summary, "completion", t0, count=completion_count)
+
+            imported_position = offset_to_position(
+                doc_text_v1, doc_text_v1.index("imported(1)") + 1
+            )
+            rid = lsp.request(
+                "textDocument/definition",
+                {"textDocument": {"uri": doc_uri}, "position": imported_position},
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            imported_definition = resp.get("result") or {}
+            if imported_definition.get("uri") != helper_uri:
+                fail(
+                    summary,
+                    "cross_file_definition",
+                    "definition did not resolve to imported helper",
+                    resp=resp,
+                )
+            record(summary, "cross_file_definition", t0)
+
+            rid = lsp.request(
+                "textDocument/references",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": imported_position,
+                    "context": {"includeDeclaration": True},
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            imported_references = resp.get("result") or []
+            if len(imported_references) != 2 or {
+                item.get("uri") for item in imported_references
+            } != {doc_uri, helper_uri}:
+                fail(
+                    summary,
+                    "cross_file_references",
+                    "expected imported definition and call",
+                    resp=resp,
+                )
+            record(summary, "cross_file_references", t0)
+
+            rid = lsp.request(
+                "textDocument/rename",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": imported_position,
+                    "newName": "renamed_import",
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            imported_changes = (resp.get("result") or {}).get("documentChanges") or []
+            if len(imported_changes) != 2:
+                fail(
+                    summary,
+                    "cross_file_rename",
+                    "expected edits for open root and closed helper",
+                    resp=resp,
+                )
+            versions = {
+                item.get("textDocument", {}).get("uri"): item.get(
+                    "textDocument", {}
+                ).get("version")
+                for item in imported_changes
+            }
+            if versions != {doc_uri: 1, helper_uri: None}:
+                fail(
+                    summary,
+                    "cross_file_rename",
+                    "unexpected document versions",
+                    versions=versions,
+                )
+            if any(
+                edit.get("newText") != "renamed_import"
+                for item in imported_changes
+                for edit in item.get("edits") or []
+            ):
+                fail(
+                    summary,
+                    "cross_file_rename",
+                    "unexpected replacement",
+                    resp=resp,
+                )
+            record(summary, "cross_file_rename", t0)
 
             symbol_position = offset_to_position(
                 doc_text_v1, doc_text_v1.index("$target") + 1
