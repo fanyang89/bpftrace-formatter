@@ -62,11 +62,23 @@ impl DocumentStore {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ServerState {
     workspace_roots: Vec<PathBuf>,
     config_path: Option<PathBuf>,
     supports_document_changes: bool,
+    trusted: bool,
+}
+
+impl Default for ServerState {
+    fn default() -> Self {
+        Self {
+            workspace_roots: Vec::new(),
+            config_path: None,
+            supports_document_changes: false,
+            trusted: true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -102,16 +114,14 @@ impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         let supports_rename = supports_document_changes(&params);
         self.configure_from_initialize(&params);
-        let roots = self
-            .state
-            .lock()
-            .expect("server state poisoned")
-            .workspace_roots
-            .clone();
+        let (roots, trusted) = {
+            let state = self.state.lock().expect("server state poisoned");
+            (state.workspace_roots.clone(), state.trusted)
+        };
         self.workspace
             .lock()
             .expect("workspace index poisoned")
-            .scan(&roots);
+            .scan(if trusted { &roots } else { &[] });
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "btfmt".to_string(),
@@ -203,6 +213,9 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        if !self.is_trusted() {
+            return;
+        }
         self.workspace
             .lock()
             .expect("workspace index poisoned")
@@ -210,6 +223,9 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        if !self.is_trusted() {
+            return;
+        }
         let mut workspace = self.workspace.lock().expect("workspace index poisoned");
         for change in params.changes {
             match change.typ {
@@ -221,6 +237,9 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        if !self.is_trusted() {
+            return;
+        }
         let mut state = self.state.lock().expect("server state poisoned");
         for removed in params.event.removed {
             if let Ok(path) = removed.uri.to_file_path() {
@@ -266,10 +285,7 @@ impl LanguageServer for Backend {
             }
         };
         match format_source(&doc.text, &config) {
-            Ok(text) => Ok(Some(vec![TextEdit {
-                range: doc.line_index.full_range(&doc.text),
-                new_text: text,
-            }])),
+            Ok(text) => Ok(Some(formatting_edits(&doc, text))),
             Err(err) => {
                 self.client
                     .log_message(MessageType::ERROR, format!("formatting failed: {err:#}"))
@@ -342,7 +358,11 @@ impl LanguageServer for Backend {
         {
             let dynamic = self
                 .probes
-                .complete(request, self.workspace_probe_metadata(&uri))
+                .complete(
+                    request,
+                    self.workspace_probe_metadata(&uri),
+                    self.is_trusted(),
+                )
                 .await;
             list.is_incomplete |= dynamic.is_incomplete;
             list.items.extend(dynamic.items);
@@ -551,6 +571,15 @@ impl Backend {
             .and_then(config_path_setting_from_value)
             .flatten();
         state.supports_document_changes = supports_document_changes(params);
+        state.trusted = params
+            .initialization_options
+            .as_ref()
+            .and_then(trusted_setting_from_value)
+            .unwrap_or(true);
+    }
+
+    fn is_trusted(&self) -> bool {
+        self.state.lock().expect("server state poisoned").trusted
     }
 
     fn config_for_uri(&self, uri: &Url) -> AnyResult<Config> {
@@ -788,6 +817,17 @@ fn lsp_range(doc: &DocumentSnapshot, range: ByteRange) -> Range {
         .range_for_offsets(&doc.text, range.start, range.end)
 }
 
+fn formatting_edits(doc: &DocumentSnapshot, formatted: String) -> Vec<TextEdit> {
+    if formatted == doc.text.as_ref() {
+        Vec::new()
+    } else {
+        vec![TextEdit {
+            range: doc.line_index.full_range(&doc.text),
+            new_text: formatted,
+        }]
+    }
+}
+
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
     if let Some(folders) = &params.workspace_folders {
         let roots: Vec<PathBuf> = folders
@@ -817,6 +857,14 @@ fn config_path_setting_from_value(value: &Value) -> Option<Option<PathBuf>> {
     } else {
         Some(Some(PathBuf::from(path)))
     }
+}
+
+fn trusted_setting_from_value(value: &Value) -> Option<bool> {
+    value
+        .get("btfmt")
+        .and_then(|btfmt| btfmt.get("trusted"))
+        .or_else(|| value.get("trusted"))
+        .and_then(Value::as_bool)
 }
 
 fn document_symbols(
@@ -997,5 +1045,24 @@ mod tests {
             ..WorkspaceClientCapabilities::default()
         });
         assert!(supports_document_changes(&params));
+    }
+
+    #[test]
+    fn trusted_setting_defaults_and_parses_explicit_values() {
+        assert_eq!(trusted_setting_from_value(&serde_json::json!({})), None);
+        assert_eq!(
+            trusted_setting_from_value(&serde_json::json!({"btfmt": {"trusted": false}})),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn unchanged_formatting_returns_no_edits() {
+        let (snapshot, _) = DocumentSnapshot::analyze("BEGIN\n{\n}\n".to_string(), Some(1));
+        assert!(formatting_edits(&snapshot, snapshot.text.to_string()).is_empty());
+        assert_eq!(
+            formatting_edits(&snapshot, "BEGIN {}\n".to_string()).len(),
+            1
+        );
     }
 }

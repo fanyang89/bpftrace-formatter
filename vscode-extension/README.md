@@ -1,25 +1,68 @@
-# btfmt LSP
+<p align="center">
+  <img src="images/icon.png" width="96" height="96" alt="btfmt logo">
+</p>
 
-VS Code extension for formatting bpftrace scripts.
+# btfmt - bpftrace Language Support
 
-## Features
+Format, complete, and navigate bpftrace scripts with a bundled native language server.
 
-- Syntax highlighting for `.bt` files
-- Format on save
-- Format document command (`Shift+Alt+F`)
-- Context-aware builtin, probe target, `args` field, variable, map, and macro completion
-- Document symbols, definitions, references, highlights, and rename
+## Language Features
 
-## Installation
+| Feature | Support |
+| --- | --- |
+| Formatting | Document and format-on-save |
+| Completion | Builtins, providers, probe targets, `args` fields, variables, maps, and macros |
+| Navigation | Definitions, references, highlights, and document symbols |
+| Refactoring | Scope-aware and cross-file rename |
+| Diagnostics | Syntax errors with UTF-16-correct ranges |
+| Syntax | TextMate highlighting for `.bt` files |
 
-Download the `.vsix` file for your platform from [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) and install via "Extensions: Install from VSIX..." command.
+## Quick Start
 
-The extension includes the btfmt binary - no additional installation required.
-Probe target and `args` field completion uses workspace scripts, portable catalogs, and readable kernel metadata without requiring root access.
+Open a `.bt` file and run **Format Document**. To enable format on save:
+
+```json
+"[bpftrace]": {
+  "editor.defaultFormatter": "fanyang89.btfmt",
+  "editor.formatOnSave": true
+}
+```
+
+The extension uses its bundled `btfmt` server by default. No separate formatter installation is required.
+
+## Completion Without Root
+
+Probe target and `args` field completion never invokes `sudo` or runs bpftrace. Candidates come from:
+
+- Probe and field usage in the current workspace
+- Kernel tracepoint metadata when it is readable by the current user
+- Portable catalogs for hardware, software, profile, and interval probes
+
+Unavailable kernel metadata is treated as a normal limited-data environment, not an error.
+
+## Commands
+
+- **btfmt: Restart Server**
+- **btfmt: Show Logs**
+- **btfmt: Open Settings**
 
 ## Settings
 
 | Setting | Default | Description |
-|---------|---------|-------------|
-| `btfmt.serverPath` | `btfmt` | Path to btfmt binary (uses bundled binary by default) |
-| `btfmt.configPath` | `""` | Path to `.btfmt.json` configuration file |
+| --- | --- | --- |
+| `btfmt.serverPath` | `""` | Custom server. Empty uses the bundled binary, then PATH as fallback. |
+| `btfmt.configPath` | `""` | Absolute or workspace-relative `.btfmt.json` path. |
+
+## Remote And Restricted Workspaces
+
+The extension runs where the workspace lives, including Remote SSH, WSL, and Dev Containers. Install the matching platform package in the remote Extension Host.
+
+Restricted Mode keeps current-document formatting, diagnostics, and static completion. Workspace indexing and system metadata access remain disabled until the workspace is trusted.
+
+## Privacy
+
+btfmt does not collect telemetry. Source code and workspace paths remain local to the Extension Host.
+
+## Support
+
+See [SUPPORT.md](SUPPORT.md) for troubleshooting and issue reporting. Release history is available in [CHANGELOG.md](CHANGELOG.md).

@@ -10,3 +10,5 @@ tsconfig.json
 **/*.map
 *.vsix
 !bin/**
+!images/icon.png
+images/*.svg

@@ -1,12 +1,25 @@
 {
-  "name": "btfmt-lsp",
-  "displayName": "btfmt LSP",
-  "description": "bpftrace formatter LSP client for VS Code",
-  "version": "0.3.0",
-  "publisher": "local",
+  "name": "btfmt",
+  "displayName": "btfmt - bpftrace Language Support",
+  "description": "Format, complete, and navigate bpftrace scripts with a bundled language server.",
+  "version": "0.3.1",
+  "publisher": "fanyang89",
+  "license": "Unlicense",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#0B1115",
+    "theme": "dark"
+  },
+  "pricing": "Free",
   "repository": {
+    "type": "git",
     "url": "https://github.com/fanyang89/bpftrace-formatter.git"
   },
+  "homepage": "https://github.com/fanyang89/bpftrace-formatter#readme",
+  "bugs": {
+    "url": "https://github.com/fanyang89/bpftrace-formatter/issues"
+  },
+  "qna": false,
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -14,6 +27,21 @@
     "Programming Languages",
     "Formatters",
     "Linters"
+  ],
+  "keywords": [
+    "bpftrace",
+    "ebpf",
+    "bpf",
+    "linux",
+    "tracing",
+    "formatter",
+    "language-server",
+    "lsp",
+    "observability",
+    "kernel"
+  ],
+  "extensionKind": [
+    "workspace"
   ],
   "main": "./out/extension.js",
   "activationEvents": [
@@ -23,18 +51,32 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Formatting uses the bundled btfmt server in Restricted Mode.",
+      "description": "Restricted Mode keeps current-document formatting, diagnostics, and static completion. Workspace indexing and system metadata access are disabled.",
       "restrictedConfigurations": [
         "btfmt.serverPath",
         "btfmt.configPath"
       ]
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "btfmt requires a local or remote workspace filesystem to run its bundled native language server."
     }
   },
   "contributes": {
     "commands": [
       {
         "command": "btfmt.restartLsp",
-        "title": "Restart LSP",
+        "title": "Restart Server",
+        "category": "btfmt"
+      },
+      {
+        "command": "btfmt.showLogs",
+        "title": "Show Logs",
+        "category": "btfmt"
+      },
+      {
+        "command": "btfmt.openSettings",
+        "title": "Open Settings",
         "category": "btfmt"
       }
     ],
@@ -62,12 +104,14 @@
       "properties": {
         "btfmt.serverPath": {
           "type": "string",
-          "default": "btfmt",
-          "description": "Path to the btfmt executable. Defaults to 'btfmt' in PATH."
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Custom btfmt executable. Leave empty to use the bundled server, with PATH as a fallback."
         },
         "btfmt.configPath": {
           "type": "string",
           "default": "",
+          "scope": "resource",
           "description": "Path to .btfmt.json. Can be absolute or workspace-relative."
         }
       }

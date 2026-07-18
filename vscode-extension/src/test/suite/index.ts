@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 
-const extensionId = 'local.btfmt-lsp';
+const extensionId = 'fanyang89.btfmt';
 
 export async function run(): Promise<void> {
   const extension = vscode.extensions.getExtension(extensionId);
@@ -18,6 +18,16 @@ export async function run(): Promise<void> {
   assert.ok(edits.length > 0, 'formatting provider returned no edits');
   const expected = 'BEGIN\n{\n    exit();\n}\n';
   assert.strictEqual(applyTextEdits(document, edits), expected);
+  const formattedDocument = await vscode.workspace.openTextDocument({
+    language: 'bpftrace',
+    content: expected,
+  });
+  const unchangedEdits = await vscode.commands.executeCommand<vscode.TextEdit[]>(
+    'vscode.executeFormatDocumentProvider',
+    formattedDocument.uri,
+    { tabSize: 4, insertSpaces: true }
+  );
+  assert.ok(!unchangedEdits || unchangedEdits.length === 0);
 
   const completions = await completionItems(document.uri, new vscode.Position(0, 8));
   assert.ok(
@@ -48,7 +58,13 @@ export async function run(): Promise<void> {
     'completion provider did not return the args field'
   );
 
-  await vscode.commands.executeCommand('btfmt.restartLsp');
+  const commands = await vscode.commands.getCommands(true);
+  assert.ok(commands.includes('btfmt.showLogs'));
+  assert.ok(commands.includes('btfmt.openSettings'));
+  await Promise.all([
+    vscode.commands.executeCommand('btfmt.restartLsp'),
+    vscode.commands.executeCommand('btfmt.restartLsp'),
+  ]);
   const restartedEdits = await formattingEdits(document.uri);
   assert.ok(restartedEdits.length > 0, 'formatting failed after LSP restart');
   assert.strictEqual(applyTextEdits(document, restartedEdits), expected);

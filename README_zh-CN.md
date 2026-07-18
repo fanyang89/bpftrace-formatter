@@ -18,13 +18,15 @@ bpftrace 脚本格式化工具，支持 VS Code 集成。
 
 ### VS Code 扩展（推荐）
 
-从 [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) 页面下载 `btfmt-lsp` 扩展：
+从 VS Code Marketplace 安装 [btfmt - bpftrace Language Support](https://marketplace.visualstudio.com/items?itemName=fanyang89.btfmt)，或在扩展视图中搜索 `btfmt`。
 
-1. 下载对应平台的 `.vsix` 文件（如 `btfmt-lsp-0.3.0@linux-x64.vsix`）
+也可以从 [GitHub Releases](https://github.com/fanyang89/bpftrace-formatter/releases) 下载对应平台的 VSIX：
+
+1. 下载对应平台的 `.vsix` 文件（如 `btfmt-0.3.1@linux-x64.vsix`）
 2. 在 VS Code 中按 `Ctrl+Shift+P`，运行 "Extensions: Install from VSIX..."
 3. 选择下载的文件
 
-扩展已内置 btfmt 二进制，无需额外安装。
+扩展已内置 btfmt 二进制，无需额外安装 formatter。
 probe target 和 `args` 字段补全使用 workspace 脚本、可移植 catalog 和当前用户可读的内核 metadata，无需 root 权限。
 
 ### CLI 二进制

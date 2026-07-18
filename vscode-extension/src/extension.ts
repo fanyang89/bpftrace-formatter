@@ -1,6 +1,6 @@
-import * as vscode from 'vscode';
-import * as path from 'path';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as vscode from 'vscode';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -8,153 +8,216 @@ import {
   ServerOptions,
   State,
 } from 'vscode-languageclient/node';
-import { execFile } from 'child_process';
 
 let client: LanguageClient | undefined;
+let stateSubscription: vscode.Disposable | undefined;
+let lifecycle: Promise<void> = Promise.resolve();
 
 function getBundledBinaryPath(context: vscode.ExtensionContext): string | undefined {
   const binaryName = process.platform === 'win32' ? 'btfmt.exe' : 'btfmt';
   const binaryPath = path.join(context.extensionPath, 'bin', binaryName);
-
-  if (fs.existsSync(binaryPath)) {
-    return binaryPath;
-  }
-  return undefined;
+  return fs.existsSync(binaryPath) ? binaryPath : undefined;
 }
 
 function getServerPath(context: vscode.ExtensionContext): string {
-  const config = vscode.workspace.getConfiguration('btfmt');
-  const configuredPath = config.get<string>('serverPath');
-
-  // If user explicitly configured a path, use it
-  if (configuredPath && configuredPath !== 'btfmt') {
+  const configuredPath = vscode.workspace
+    .getConfiguration('btfmt')
+    .get<string>('serverPath', '')
+    .trim();
+  if (configuredPath) {
     return configuredPath;
   }
-
-  // Try bundled binary first
-  const bundledPath = getBundledBinaryPath(context);
-  if (bundledPath) {
-    return bundledPath;
-  }
-
-  // Fall back to PATH
-  return 'btfmt';
+  return getBundledBinaryPath(context) ?? 'btfmt';
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const outputChannel = vscode.window.createOutputChannel('btfmt LSP');
+  const log = vscode.window.createOutputChannel('btfmt', { log: true });
+  const status = vscode.languages.createLanguageStatusItem('btfmt.server', {
+    language: 'bpftrace',
+  });
+  status.name = 'btfmt';
   const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.bt');
-  context.subscriptions.push(outputChannel, fileWatcher);
-  startClient(context, outputChannel, fileWatcher);
+  context.subscriptions.push(log, status, fileWatcher);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('btfmt.restartLsp', () =>
-      restartLsp(context, outputChannel, fileWatcher)
-    )
-  );
-
-  context.subscriptions.push(
+      enqueue(() => restartClient(context, log, status, fileWatcher)).catch(() => undefined)
+    ),
+    vscode.commands.registerCommand('btfmt.showLogs', () => log.show(true)),
+    vscode.commands.registerCommand('btfmt.openSettings', () =>
+      vscode.commands.executeCommand(
+        'workbench.action.openSettings',
+        `@ext:${context.extension.id}`
+      )
+    ),
+    vscode.workspace.onDidGrantWorkspaceTrust(() =>
+      enqueue(() => restartClient(context, log, status, fileWatcher)).catch(() => undefined)
+    ),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('btfmt.serverPath')) {
-        void restartLsp(context, outputChannel, fileWatcher);
+        void enqueue(() => restartClient(context, log, status, fileWatcher)).catch(
+          () => undefined
+        );
         return;
       }
       if (!client || !event.affectsConfiguration('btfmt.configPath')) {
         return;
       }
-      client.sendNotification('workspace/didChangeConfiguration', {
+      void client.sendNotification('workspace/didChangeConfiguration', {
         settings: { btfmt: buildSettings() },
       });
     })
   );
+
+  void enqueue(() => startClient(context, log, status, fileWatcher)).catch(() => undefined);
 }
 
-function startClient(
+async function startClient(
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel,
+  log: vscode.LogOutputChannel,
+  status: vscode.LanguageStatusItem,
   fileWatcher: vscode.FileSystemWatcher
-): void {
+): Promise<void> {
   const serverPath = getServerPath(context);
-  outputChannel.appendLine(`[Info ] Using server path: ${serverPath}`);
-
-  execFile(serverPath, ['--help'], { timeout: 5000 }, (err, _stdout, _stderr) => {
-    if (err) {
-      outputChannel.appendLine(`[Error] Cannot run ${serverPath}: ${err.message}`);
-    } else {
-      outputChannel.appendLine(`[Info ] Server binary OK`);
-    }
-  });
+  log.info(`Using server: ${serverPath}`);
+  updateStatus(status, 'starting');
 
   const serverOptions: ServerOptions = {
     command: serverPath,
     args: ['lsp'],
     options: { env: { ...process.env } },
   };
-
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ language: 'bpftrace' }],
     initializationOptions: { btfmt: buildSettings() },
     synchronize: { configurationSection: 'btfmt', fileEvents: fileWatcher },
-    outputChannel,
-    revealOutputChannelOn: RevealOutputChannelOn.Error,
+    outputChannel: log,
+    revealOutputChannelOn: RevealOutputChannelOn.Never,
     middleware: {
       provideDocumentFormattingEdits: async (document, options, token, next) => {
-        outputChannel.appendLine(`[Format] request ${document.uri.toString()}`);
+        log.debug(`Formatting ${document.uri.toString()}`);
         try {
           const result = await withTimeout(next(document, options, token), 35_000);
-          const count = Array.isArray(result) ? result.length : 0;
-          outputChannel.appendLine(`[Format] response edits=${count}`);
+          const editCount = Array.isArray(result) ? result.length : 0;
+          log.debug(`Formatting completed with ${editCount} edits`);
           return result;
-        } catch (err) {
-          const message = err instanceof Error ? err.stack ?? err.message : String(err);
-          outputChannel.appendLine(`[Format] error ${message}`);
-          throw err;
+        } catch (error) {
+          log.error(error instanceof Error ? error : String(error));
+          throw error;
         }
       },
     },
   };
 
-  const nextClient = new LanguageClient('btfmt', 'btfmt LSP', serverOptions, clientOptions);
+  const nextClient = new LanguageClient('btfmt', 'btfmt', serverOptions, clientOptions);
   client = nextClient;
-  outputChannel.appendLine('[Info ] btfmt LSP activated');
-  context.subscriptions.push(
-    nextClient.onDidChangeState((event) => {
-      outputChannel.appendLine(
-        `[State] ${formatState(event.oldState)} -> ${formatState(event.newState)}`
-      );
-    }),
-    nextClient
-  );
-  void nextClient.start().catch((err) => {
-    const message = err instanceof Error ? err.stack ?? err.message : String(err);
-    outputChannel.appendLine(`[Error] failed to start: ${message}`);
-    outputChannel.show(true);
+  stateSubscription?.dispose();
+  stateSubscription = nextClient.onDidChangeState((event) => {
+    log.debug(`Server ${formatState(event.oldState)} -> ${formatState(event.newState)}`);
+    if (client !== nextClient) {
+      return;
+    }
+    if (event.newState === State.Starting) {
+      updateStatus(status, 'starting');
+    } else if (event.newState === State.Running) {
+      updateStatus(status, vscode.workspace.isTrusted ? 'ready' : 'limited');
+    } else {
+      updateStatus(status, 'stopped');
+    }
   });
-}
 
-export function deactivate(): Thenable<void> | undefined {
-  if (!client) {
-    return undefined;
+  try {
+    await nextClient.start();
+    if (client === nextClient) {
+      updateStatus(status, vscode.workspace.isTrusted ? 'ready' : 'limited');
+      log.info('Language server ready');
+    }
+  } catch (error) {
+    if (client === nextClient) {
+      client = undefined;
+      updateStatus(status, 'error');
+    }
+    log.error(error instanceof Error ? error : String(error));
+    throw error;
   }
-  return client.stop();
 }
 
-async function restartLsp(
+async function restartClient(
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel,
+  log: vscode.LogOutputChannel,
+  status: vscode.LanguageStatusItem,
   fileWatcher: vscode.FileSystemWatcher
 ): Promise<void> {
+  log.info('Restarting language server');
+  await stopClient();
+  await startClient(context, log, status, fileWatcher);
+}
+
+async function stopClient(): Promise<void> {
   const previous = client;
   client = undefined;
+  stateSubscription?.dispose();
+  stateSubscription = undefined;
   if (previous) {
     await previous.stop();
   }
-  startClient(context, outputChannel, fileWatcher);
+}
+
+function enqueue(operation: () => Promise<void>): Promise<void> {
+  const next = lifecycle.then(operation, operation);
+  lifecycle = next.catch(() => undefined);
+  return next;
+}
+
+export function deactivate(): Thenable<void> {
+  return enqueue(stopClient);
 }
 
 function buildSettings(): Record<string, unknown> {
   const config = vscode.workspace.getConfiguration('btfmt');
-  return { configPath: config.get<string>('configPath', '') };
+  return {
+    configPath: config.get<string>('configPath', ''),
+    trusted: vscode.workspace.isTrusted,
+  };
+}
+
+function updateStatus(
+  status: vscode.LanguageStatusItem,
+  phase: 'starting' | 'ready' | 'limited' | 'stopped' | 'error'
+): void {
+  status.busy = phase === 'starting';
+  switch (phase) {
+    case 'starting':
+      status.severity = vscode.LanguageStatusSeverity.Information;
+      status.text = '$(sync~spin) btfmt';
+      status.detail = 'Starting language server';
+      break;
+    case 'ready':
+      status.severity = vscode.LanguageStatusSeverity.Information;
+      status.text = '$(check) btfmt';
+      status.detail = 'Language features ready';
+      break;
+    case 'limited':
+      status.severity = vscode.LanguageStatusSeverity.Warning;
+      status.text = '$(shield) btfmt';
+      status.detail = 'Limited in Restricted Mode';
+      break;
+    case 'stopped':
+      status.severity = vscode.LanguageStatusSeverity.Warning;
+      status.text = '$(circle-slash) btfmt';
+      status.detail = 'Language server stopped';
+      break;
+    case 'error':
+      status.severity = vscode.LanguageStatusSeverity.Error;
+      status.text = '$(error) btfmt';
+      status.detail = 'Language server failed to start';
+      break;
+  }
+  const canRestart = phase === 'error' || phase === 'stopped';
+  status.command = {
+    command: canRestart ? 'btfmt.restartLsp' : 'btfmt.showLogs',
+    title: canRestart ? 'Restart Server' : 'Show Logs',
+  };
 }
 
 function withTimeout<T>(

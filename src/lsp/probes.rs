@@ -144,6 +144,7 @@ impl ProbeCatalog {
         &self,
         request: CompletionRequest,
         workspace: WorkspaceMetadata,
+        allow_kernel_metadata: bool,
     ) -> CompletionList {
         match request {
             CompletionRequest::ProbeTargets {
@@ -152,7 +153,9 @@ impl ProbeCatalog {
                 range,
             } => {
                 let mut candidates = workspace.targets;
-                candidates.extend(self.kernel_targets().await);
+                if allow_kernel_metadata {
+                    candidates.extend(self.kernel_targets().await);
+                }
                 candidates.extend(STATIC_TARGETS.iter().map(|(full_name, detail)| {
                     TargetCandidate {
                         full_name: (*full_name).to_string(),
@@ -177,7 +180,9 @@ impl ProbeCatalog {
                             .cloned()
                     })
                     .collect::<Vec<_>>();
-                candidates.extend(self.kernel_fields(&probes).await);
+                if allow_kernel_metadata {
+                    candidates.extend(self.kernel_fields(&probes).await);
+                }
                 field_completions(&field_prefix, range, candidates)
             }
         }

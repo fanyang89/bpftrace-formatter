@@ -18,13 +18,15 @@ A formatter for bpftrace scripts with VS Code integration.
 
 ### VS Code Extension (Recommended)
 
-Install the `btfmt-lsp` extension from the [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) page:
+Install [btfmt - bpftrace Language Support](https://marketplace.visualstudio.com/items?itemName=fanyang89.btfmt) from the VS Code Marketplace or search for `btfmt` in the Extensions view.
 
-1. Download the `.vsix` file for your platform (e.g., `btfmt-lsp-0.3.0@linux-x64.vsix`)
+Platform-specific VSIX files are also available from [GitHub Releases](https://github.com/fanyang89/bpftrace-formatter/releases):
+
+1. Download the `.vsix` file for your platform (e.g., `btfmt-0.3.1@linux-x64.vsix`)
 2. In VS Code, press `Ctrl+Shift+P` and run "Extensions: Install from VSIX..."
 3. Select the downloaded file
 
-The extension includes the btfmt binary - no additional installation required.
+The extension includes the btfmt binary - no additional formatter installation required.
 Probe target and `args` field completion uses workspace scripts, portable catalogs, and readable kernel metadata without requiring root access.
 
 ### CLI Binary
