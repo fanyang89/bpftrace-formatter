@@ -158,16 +158,9 @@ Example `.btfmt.json`:
 | `spacing`     | `around_parentheses`         | false       | Space inside parentheses                 |
 | `spacing`     | `around_brackets`            | false       | Space inside brackets                    |
 | `spacing`     | `before_block_start`         | true        | Space before `{`                         |
-| `spacing`     | `after_keywords`             | true        | Space after `if`, `while`, etc.          |
-| `spacing`     | `inside_predicates`          | true        | Space inside predicate `/.../` sections  |
-| `line_breaks` | `max_line_length`            | 80          | Maximum line length hint                 |
-| `line_breaks` | `break_long_statements`      | true        | Allow wrapping long statements           |
 | `line_breaks` | `empty_lines_between_probes` | 1           | Empty lines between probe blocks         |
 | `line_breaks` | `empty_lines_after_shebang`  | 1           | Empty lines after shebang                |
 | `comments`    | `preserve_inline`            | true        | Preserve inline comments when possible   |
-| `comments`    | `indent_level`               | 0           | Extra indentation for standalone comments |
-| `probes`      | `align_predicates`           | false       | Align predicate formatting               |
-| `probes`      | `newline_between_specifiers` | false       | Line break between probe specifiers      |
 | `blocks`      | `brace_style`                | "next_line" | `"same_line"`, `"next_line"`, or `"gnu"` |
 | `blocks`      | `indent_statements`          | true        | Indent statements inside blocks          |
 

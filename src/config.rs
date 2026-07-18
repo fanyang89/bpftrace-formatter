@@ -5,60 +5,47 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub indent: IndentConfig,
     pub spacing: SpacingConfig,
     pub line_breaks: LineBreakConfig,
     pub comments: CommentConfig,
-    pub probes: ProbeConfig,
     pub blocks: BlockConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct IndentConfig {
     pub size: usize,
     pub use_spaces: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SpacingConfig {
     pub around_operators: bool,
     pub around_commas: bool,
     pub around_parentheses: bool,
     pub around_brackets: bool,
     pub before_block_start: bool,
-    pub after_keywords: bool,
-    pub inside_predicates: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LineBreakConfig {
-    pub max_line_length: usize,
-    pub break_long_statements: bool,
     pub empty_lines_between_probes: usize,
     pub empty_lines_after_shebang: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CommentConfig {
     pub preserve_inline: bool,
-    pub indent_level: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct ProbeConfig {
-    pub align_predicates: bool,
-    pub newline_between_specifiers: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct BlockConfig {
     pub brace_style: BraceStyle,
     pub indent_statements: bool,
@@ -97,12 +84,6 @@ impl Default for CommentConfig {
     }
 }
 
-impl Default for ProbeConfig {
-    fn default() -> Self {
-        Config::default().probes
-    }
-}
-
 impl Default for BlockConfig {
     fn default() -> Self {
         Config::default().blocks
@@ -122,22 +103,13 @@ impl Default for Config {
                 around_parentheses: false,
                 around_brackets: false,
                 before_block_start: true,
-                after_keywords: true,
-                inside_predicates: true,
             },
             line_breaks: LineBreakConfig {
-                max_line_length: 80,
-                break_long_statements: true,
                 empty_lines_between_probes: 1,
                 empty_lines_after_shebang: 1,
             },
             comments: CommentConfig {
                 preserve_inline: true,
-                indent_level: 0,
-            },
-            probes: ProbeConfig {
-                align_predicates: false,
-                newline_between_specifiers: false,
             },
             blocks: BlockConfig {
                 brace_style: BraceStyle::NextLine,
@@ -180,6 +152,7 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
+        self.validate()?;
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
@@ -190,10 +163,10 @@ impl Config {
 
 pub fn load_for_cwd(explicit_path: Option<&Path>) -> Result<Config> {
     if let Some(path) = explicit_path {
-        if path.exists() {
-            return Config::load(path);
+        if !path.exists() {
+            anyhow::bail!("config file does not exist: {}", path.display());
         }
-        return Ok(Config::default());
+        return Config::load(path);
     }
 
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -218,10 +191,10 @@ pub fn load_from_base(base_dir: &Path, explicit_path: Option<&Path>) -> Result<C
         } else {
             base_dir.join(path)
         };
-        if path.exists() {
-            return Config::load(&path);
+        if !path.exists() {
+            anyhow::bail!("config file does not exist: {}", path.display());
         }
-        return Ok(Config::default());
+        return Config::load(&path);
     }
 
     if let Some(path) = search_upwards(base_dir, ".btfmt.json") {

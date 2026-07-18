@@ -158,16 +158,9 @@ btfmt -generate-config
 | `spacing`     | `around_parentheses`         | false       | 括号内加空格                     |
 | `spacing`     | `around_brackets`            | false       | 方括号内加空格                   |
 | `spacing`     | `before_block_start`         | true        | `{` 前加空格                     |
-| `spacing`     | `after_keywords`             | true        | `if`、`while` 等关键字后加空格   |
-| `spacing`     | `inside_predicates`          | true        | 谓词 `/.../` 内加空格            |
-| `line_breaks` | `max_line_length`            | 80          | 最大行宽提示                     |
-| `line_breaks` | `break_long_statements`      | true        | 允许长语句换行                   |
 | `line_breaks` | `empty_lines_between_probes` | 1           | 探针块之间的空行数               |
 | `line_breaks` | `empty_lines_after_shebang`  | 1           | shebang 后的空行数               |
 | `comments`    | `preserve_inline`            | true        | 尽量保留行内注释                 |
-| `comments`    | `indent_level`               | 0           | 独立注释的额外缩进级别           |
-| `probes`      | `align_predicates`           | false       | 对齐谓词格式                     |
-| `probes`      | `newline_between_specifiers` | false       | 探针 specifier 之间换行          |
 | `blocks`      | `brace_style`                | "next_line" | `"same_line"`、`"next_line"` 或 `"gnu"` |
 | `blocks`      | `indent_statements`          | true        | 缩进块内语句                     |
 
