@@ -440,6 +440,55 @@ def main():
                 fail(summary, "completion", "expected completion items", resp=resp)
             record(summary, "completion", t0, count=completion_count)
 
+            rid = lsp.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": offset_to_position(
+                        doc_text_v1, doc_text_v1.index("imported(1)") + 5
+                    ),
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            imported_completion = resp.get("result") or {}
+            imported_items = (
+                imported_completion.get("items")
+                if isinstance(imported_completion, dict)
+                else imported_completion
+            ) or []
+            if "imported" not in {item.get("label") for item in imported_items}:
+                fail(
+                    summary,
+                    "context_completion",
+                    "imported macro is missing from completion",
+                    resp=resp,
+                )
+
+            rid = lsp.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": offset_to_position(
+                        doc_text_v1, doc_text_v1.index("$target") + 4
+                    ),
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            variable_completion = resp.get("result") or {}
+            variable_items = (
+                variable_completion.get("items")
+                if isinstance(variable_completion, dict)
+                else variable_completion
+            ) or []
+            if [item.get("label") for item in variable_items] != ["$target"]:
+                fail(
+                    summary,
+                    "context_completion",
+                    "scratch completion is not scope-filtered",
+                    resp=resp,
+                )
+            record(summary, "context_completion", t0)
+
             imported_position = offset_to_position(
                 doc_text_v1, doc_text_v1.index("imported(1)") + 1
             )

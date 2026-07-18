@@ -41,6 +41,21 @@ pub(super) struct GlobalSymbolOccurrence {
     pub definition: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CompletionSymbolKind {
+    Scratch,
+    Map,
+    Parameter,
+    Macro,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CompletionSymbol {
+    pub label: String,
+    pub kind: CompletionSymbolKind,
+    pub scope_distance: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum SymbolKind {
     Scratch,
@@ -60,6 +75,7 @@ impl SymbolKind {
 struct Scope {
     parent: Option<usize>,
     kind: ScopeKind,
+    range: ByteRange,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,10 +140,22 @@ impl SymbolIndex {
         if tree.root_node().has_error() {
             return None;
         }
+        Some(Self::build(source, tree))
+    }
+
+    pub(super) fn new_for_completion(source: &str, tree: &Tree) -> Self {
+        Self::build(source, tree)
+    }
+
+    fn build(source: &str, tree: &Tree) -> Self {
         let mut index = Self {
             scopes: vec![Scope {
                 parent: None,
                 kind: ScopeKind::Global,
+                range: ByteRange {
+                    start: 0,
+                    end: source.len(),
+                },
             }],
             bindings: Vec::new(),
             scope_bindings: vec![HashMap::new()],
@@ -138,7 +166,7 @@ impl SymbolIndex {
         };
         index.predeclare_macros(source, tree.root_node());
         index.walk_node(source, tree.root_node(), 0);
-        Some(index)
+        index
     }
 
     pub(super) fn prepare_range(&self, offset: usize) -> Option<ByteRange> {
@@ -235,6 +263,80 @@ impl SymbolIndex {
                 Ok(name.to_string())
             }
         }
+    }
+
+    pub(super) fn visible_symbols_at(&self, offset: usize) -> Vec<CompletionSymbol> {
+        let scope = self.scope_at(offset);
+        let mut result = Vec::new();
+        let mut distance_by_scope = HashMap::new();
+        let mut current = Some(scope);
+        let mut distance = 0usize;
+        while let Some(scope) = current {
+            distance_by_scope.insert(scope, distance);
+            current = self.scopes[scope].parent;
+            distance += 1;
+        }
+
+        for binding in &self.bindings {
+            if binding.name.is_empty() || binding.definition.is_none() {
+                continue;
+            }
+            let kind = match binding.kind {
+                SymbolKind::Scratch => CompletionSymbolKind::Scratch,
+                SymbolKind::Map => CompletionSymbolKind::Map,
+            };
+            let visible = binding.scope == 0 || distance_by_scope.contains_key(&binding.scope);
+            if !visible {
+                continue;
+            }
+            if binding.kind == SymbolKind::Scratch
+                && binding
+                    .definition
+                    .is_some_and(|idx| self.occurrences[idx].range.start > offset)
+            {
+                continue;
+            }
+            result.push(CompletionSymbol {
+                label: format!("{}{}", binding.kind.sigil(), binding.name),
+                kind,
+                scope_distance: distance_by_scope
+                    .get(&binding.scope)
+                    .copied()
+                    .unwrap_or(usize::MAX / 2),
+            });
+        }
+        for binding in &self.named_bindings {
+            let (kind, label) = match binding.kind {
+                NamedKind::Macro if binding.scope == 0 => {
+                    (CompletionSymbolKind::Macro, binding.name.clone())
+                }
+                NamedKind::Parameter if distance_by_scope.contains_key(&binding.scope) => {
+                    (CompletionSymbolKind::Parameter, binding.name.clone())
+                }
+                _ => continue,
+            };
+            result.push(CompletionSymbol {
+                label,
+                kind,
+                scope_distance: distance_by_scope
+                    .get(&binding.scope)
+                    .copied()
+                    .unwrap_or(usize::MAX / 2),
+            });
+        }
+        result
+    }
+
+    pub(super) fn global_completion_symbols(&self) -> Vec<CompletionSymbol> {
+        self.visible_symbols_at(0)
+            .into_iter()
+            .filter(|symbol| {
+                matches!(
+                    symbol.kind,
+                    CompletionSymbolKind::Map | CompletionSymbolKind::Macro
+                )
+            })
+            .collect()
     }
 
     #[cfg(test)]
@@ -397,7 +499,7 @@ impl SymbolIndex {
     fn walk_node(&mut self, source: &str, node: Node<'_>, scope: usize) {
         match node.kind() {
             "macro_definition" => {
-                let macro_scope = self.new_macro_scope(scope);
+                let macro_scope = self.new_macro_scope(scope, node);
                 if let Some(parameters) = node.child_by_field_name("parameters") {
                     let mut cursor = parameters.walk();
                     for child in parameters.named_children(&mut cursor) {
@@ -425,12 +527,12 @@ impl SymbolIndex {
                 return;
             }
             "action" => {
-                let action_scope = self.new_scope(scope);
+                let action_scope = self.new_scope(scope, node);
                 self.walk_children(source, node, action_scope);
                 return;
             }
             "block" | "block_expression" => {
-                let block_scope = self.new_scope(scope);
+                let block_scope = self.new_scope(scope, node);
                 self.walk_children(source, node, block_scope);
                 return;
             }
@@ -459,7 +561,7 @@ impl SymbolIndex {
             self.walk_children(source, node, scope);
             return;
         };
-        let body_scope = self.new_scope(scope);
+        let body_scope = self.new_scope(scope, body);
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             if same_node(child, body) {
@@ -614,22 +716,30 @@ impl SymbolIndex {
         }
     }
 
-    fn new_scope(&mut self, parent: usize) -> usize {
+    fn new_scope(&mut self, parent: usize, node: Node<'_>) -> usize {
         let idx = self.scopes.len();
         self.scopes.push(Scope {
             parent: Some(parent),
             kind: ScopeKind::Lexical,
+            range: ByteRange {
+                start: node.start_byte(),
+                end: node.end_byte(),
+            },
         });
         self.scope_bindings.push(HashMap::new());
         self.named_scope_bindings.push(HashMap::new());
         idx
     }
 
-    fn new_macro_scope(&mut self, parent: usize) -> usize {
+    fn new_macro_scope(&mut self, parent: usize, node: Node<'_>) -> usize {
         let idx = self.scopes.len();
         self.scopes.push(Scope {
             parent: Some(parent),
             kind: ScopeKind::Macro,
+            range: ByteRange {
+                start: node.start_byte(),
+                end: node.end_byte(),
+            },
         });
         self.scope_bindings.push(HashMap::new());
         self.named_scope_bindings.push(HashMap::new());
@@ -732,6 +842,16 @@ impl SymbolIndex {
             };
             scope = parent;
         }
+    }
+
+    fn scope_at(&self, offset: usize) -> usize {
+        self.scopes
+            .iter()
+            .enumerate()
+            .filter(|(_, scope)| scope.range.start <= offset && offset <= scope.range.end)
+            .max_by_key(|(_, scope)| scope.range.start)
+            .map(|(idx, _)| idx)
+            .unwrap_or(0)
     }
 }
 

@@ -11,7 +11,8 @@ pub(super) struct DocumentSnapshot {
     pub version: Option<i32>,
     pub tree: Option<Tree>,
     pub line_index: LineIndex,
-    pub symbols: Option<SymbolIndex>,
+    pub symbols: Option<Arc<SymbolIndex>>,
+    pub completion_symbols: Option<Arc<SymbolIndex>>,
 }
 
 impl DocumentSnapshot {
@@ -30,7 +31,14 @@ impl DocumentSnapshot {
                 }],
             ),
         };
-        let symbols = tree.as_ref().and_then(|tree| SymbolIndex::new(&text, tree));
+        let symbols = tree
+            .as_ref()
+            .and_then(|tree| SymbolIndex::new(&text, tree))
+            .map(Arc::new);
+        let completion_symbols = symbols.clone().or_else(|| {
+            tree.as_ref()
+                .map(|tree| Arc::new(SymbolIndex::new_for_completion(&text, tree)))
+        });
         (
             Arc::new(Self {
                 text: Arc::from(text),
@@ -38,6 +46,7 @@ impl DocumentSnapshot {
                 tree,
                 line_index,
                 symbols,
+                completion_symbols,
             }),
             diagnostics,
         )

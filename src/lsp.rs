@@ -1,4 +1,5 @@
 mod catalog;
+mod completion;
 mod snapshot;
 mod symbols;
 mod workspace;
@@ -124,7 +125,10 @@ impl LanguageServer for Backend {
                 )),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
-                completion_provider: Some(CompletionOptions::default()),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec!["$".to_string(), "@".to_string()]),
+                    ..CompletionOptions::default()
+                }),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -305,8 +309,26 @@ impl LanguageServer for Backend {
         }))
     }
 
-    async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
-        Ok(Some(CompletionResponse::Array(completion_items())))
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let Some(doc) = self.doc(&uri) else {
+            return Ok(Some(CompletionResponse::List(CompletionList {
+                is_incomplete: false,
+                items: Vec::new(),
+            })));
+        };
+        let workspace_symbols = self.workspace_completion_symbols(&uri);
+        let incomplete = self
+            .workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .is_incomplete();
+        Ok(Some(CompletionResponse::List(completion::complete(
+            &doc,
+            params.text_document_position.position,
+            workspace_symbols,
+            incomplete,
+        ))))
     }
 
     async fn goto_definition(
@@ -612,6 +634,25 @@ impl Backend {
         occurrences
     }
 
+    fn workspace_completion_symbols(&self, origin: &Url) -> Vec<self::symbols::CompletionSymbol> {
+        let files = self
+            .workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .program_files(origin);
+        let mut symbols = Vec::new();
+        for uri in files {
+            let Some(snapshot) = self.effective_snapshot(&uri) else {
+                continue;
+            };
+            let Some(index) = snapshot.completion_symbols.as_ref() else {
+                continue;
+            };
+            symbols.extend(index.global_completion_symbols());
+        }
+        symbols
+    }
+
     fn rename_global(
         &self,
         origin: &Url,
@@ -806,15 +847,6 @@ fn new_document_symbol(
         selection_range,
         children: None,
     }
-}
-
-fn completion_items() -> Vec<CompletionItem> {
-    catalog::entries()
-        .iter()
-        .filter(|entry| entry.contexts != 0)
-        .copied()
-        .map(catalog::CatalogEntry::completion_item)
-        .collect()
 }
 
 fn hover_markdown(word: &str) -> Option<String> {

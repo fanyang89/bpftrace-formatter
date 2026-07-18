@@ -134,6 +134,10 @@ impl WorkspaceIndex {
         self.ready && !self.incomplete
     }
 
+    pub(super) fn is_incomplete(&self) -> bool {
+        !self.ready || self.incomplete
+    }
+
     fn rebuild_graph(&mut self) {
         self.forward.clear();
         self.reverse.clear();
