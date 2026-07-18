@@ -1,6 +1,6 @@
 use btfmt::text::{
     all_identifier_occurrences, full_range, identifier_at_position, offset_for_position,
-    position_for_offset,
+    position_for_offset, LineIndex,
 };
 use tower_lsp::lsp_types::Position;
 
@@ -12,6 +12,11 @@ fn offset_and_position_round_trip_ascii_and_unicode() {
     assert_eq!(offset_for_position(text, pos), offset);
     assert_eq!(position_for_offset(text, text.len()).line, 2);
     assert_eq!(position_for_offset(text, 1), Position::new(0, 0));
+
+    let index = LineIndex::new(text);
+    assert_eq!(index.position_for_offset(text, offset), pos);
+    assert_eq!(index.offset_for_position(text, pos), offset);
+    assert_eq!(index.full_range(text), full_range(text));
 }
 
 #[test]
