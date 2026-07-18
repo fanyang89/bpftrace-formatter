@@ -89,9 +89,9 @@ tasks:
       - cargo test
 
   test-tools:
-    desc: Run tests against bpftrace/tools
+    desc: Run tests against the bpftrace tools corpus
     cmds:
-      - for f in bpftrace/tools/*.bt; do cargo run --quiet -- "$f" >/tmp/btfmt-tools.out || exit 1; done
+      - for f in tests/corpus/bpftrace-tools/*.bt; do cargo run --quiet -- "$f" >/tmp/btfmt-tools.out || exit 1; done
 
   lsp-smoke:
     desc: Smoke test for btfmt LSP (stdio)

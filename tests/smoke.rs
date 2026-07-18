@@ -35,10 +35,7 @@ fn formats_testdata_fixtures() {
 #[test]
 fn formats_bpftrace_tools_corpus() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let tools = root.join("bpftrace/tools");
-    if !tools.exists() {
-        return;
-    }
+    let tools = root.join("tests/corpus/bpftrace-tools");
 
     let config = Config::default();
     for path in bt_files(&tools) {

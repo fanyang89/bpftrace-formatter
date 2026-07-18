@@ -19,7 +19,7 @@ It summarizes the commands and style conventions observed in the codebase.
 
 - Build: `task build`
 - Test: `task test`
-- Test (tools fixtures): `task test-tools`
+- Test (tools corpus): `task test-tools`
 - Format Rust code: `task fmt`
 - LSP smoke test: `task lsp-smoke`
 - Validate release config: `goreleaser check .goreleaser.yaml`
@@ -57,7 +57,7 @@ It summarizes the commands and style conventions observed in the codebase.
 - `tests/`: Rust integration tests
 - `tests/testdata/`: input fixtures
 - `tests/testdata/golden/`: expected Rust formatter output
-- `bpftrace/tools/`: upstream bpftrace tool scripts for acceptance tests
+- `tests/corpus/bpftrace-tools/`: upstream bpftrace scripts for acceptance tests
 - `vscode-extension/`: VS Code extension client
 
 ## Parser Policy
@@ -81,7 +81,7 @@ It summarizes the commands and style conventions observed in the codebase.
 - Unit tests may live beside Rust modules.
 - Integration tests live in `tests/*.rs`.
 - Golden tests read fixtures from `tests/testdata/` and compare to `tests/testdata/golden/`.
-- Acceptance tests parse/format files under `bpftrace/tools`.
+- Acceptance tests parse/format files under `tests/corpus/bpftrace-tools/`.
 - LSP behavior is covered by `tests/lsp_smoke.rs`, which runs `scripts/lsp_smoke.py` against the Cargo-built binary.
 
 ## Code Style Guidelines
