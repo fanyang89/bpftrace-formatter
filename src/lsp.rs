@@ -278,42 +278,65 @@ fn config_path_setting_from_value(value: &Value) -> Option<Option<PathBuf>> {
 }
 
 fn document_symbols(text: &str) -> Vec<DocumentSymbol> {
-    text.lines()
-        .enumerate()
-        .filter_map(|(line_idx, line)| {
-            let trimmed = line.trim();
-            if !trimmed.contains('{')
-                || trimmed.starts_with("if")
-                || trimmed.starts_with("while")
-                || trimmed.starts_with("for")
-            {
-                return None;
+    let Ok(parsed) = parse::parse(text) else {
+        return Vec::new();
+    };
+    let root = parsed.tree.root_node();
+    let mut cursor = root.walk();
+    root.named_children(&mut cursor)
+        .filter_map(|node| match node.kind() {
+            "action_block" => {
+                let mut child_cursor = node.walk();
+                let probes = node
+                    .named_children(&mut child_cursor)
+                    .find(|child| child.kind() == "probes_list")?;
+                let name = text_for_node(text, probes);
+                Some(new_document_symbol(
+                    name,
+                    SymbolKind::EVENT,
+                    range_for_offsets(text, node.start_byte(), node.end_byte()),
+                    range_for_offsets(text, probes.start_byte(), probes.end_byte()),
+                ))
             }
-            let name = trimmed.split('{').next().unwrap_or(trimmed).trim();
-            if name.is_empty() {
-                return None;
+            "macro_definition" => {
+                let name_node = node.child_by_field_name("name")?;
+                let name = format!("macro {}", text_for_node(text, name_node));
+                Some(new_document_symbol(
+                    name,
+                    SymbolKind::FUNCTION,
+                    range_for_offsets(text, node.start_byte(), node.end_byte()),
+                    range_for_offsets(text, name_node.start_byte(), name_node.end_byte()),
+                ))
             }
-            let start = text
-                .lines()
-                .take(line_idx)
-                .map(|line| line.len() + 1)
-                .sum::<usize>();
-            let end = start + line.len();
-            let range = range_for_offsets(text, start, end);
-            #[allow(deprecated)]
-            let symbol = DocumentSymbol {
-                name: name.to_string(),
-                detail: None,
-                kind: SymbolKind::EVENT,
-                tags: None,
-                deprecated: None,
-                range,
-                selection_range: range,
-                children: None,
-            };
-            Some(symbol)
+            _ => None,
         })
         .collect()
+}
+
+fn text_for_node(text: &str, node: tree_sitter::Node<'_>) -> String {
+    text[node.byte_range()]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn new_document_symbol(
+    name: String,
+    kind: SymbolKind,
+    range: Range,
+    selection_range: Range,
+) -> DocumentSymbol {
+    #[allow(deprecated)]
+    DocumentSymbol {
+        name,
+        detail: None,
+        kind,
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range,
+        children: None,
+    }
 }
 
 fn completion_items() -> Vec<CompletionItem> {
@@ -358,4 +381,43 @@ fn hover_markdown(word: &str) -> Option<String> {
         _ => return None,
     };
     Some(format!("**bpftrace** `{word}`\n\n{value}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn document_symbols_follow_action_block_syntax() {
+        let text = concat!(
+            "BEGIN\r\n",
+            "{\r\n",
+            "    exit();\r\n",
+            "}\r\n",
+            "\r\n",
+            "kprobe:vfs_read*,\r\n",
+            "kprobe:vfs_write* /pid == 1/\r\n",
+            "{\r\n",
+            "    exit();\r\n",
+            "}\r\n",
+        );
+
+        let symbols = document_symbols(text);
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].name, "BEGIN");
+        assert_eq!(symbols[1].name, "kprobe:vfs_read*, kprobe:vfs_write*");
+        assert_eq!(symbols[0].selection_range.start, Position::new(0, 0));
+        assert_eq!(symbols[1].selection_range.start, Position::new(5, 0));
+        assert_eq!(symbols[1].range.end.line, 9);
+    }
+
+    #[test]
+    fn document_symbols_include_macros() {
+        let text = "macro add_one(value) { return value + 1; }\n";
+        let symbols = document_symbols(text);
+
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "macro add_one");
+        assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
+    }
 }
