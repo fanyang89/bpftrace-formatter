@@ -69,6 +69,12 @@ jobs:
           cache: npm
           cache-dependency-path: vscode-extension/package-lock.json
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies
         run: npm ci
 
@@ -80,3 +86,14 @@ jobs:
 
       - name: Check package contents
         run: npx vsce ls
+
+      - name: Build LSP server
+        run: cargo build --manifest-path ../Cargo.toml --bin btfmt
+
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
+
+      - name: Run Extension Host test
+        env:
+          BTFMT_PATH: ../target/debug/btfmt
+        run: xvfb-run -a npm test

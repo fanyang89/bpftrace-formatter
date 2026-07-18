@@ -127,6 +127,17 @@ tasks:
       - npm run typecheck
       - npm run compile
 
+  vscode:test:
+    desc: Run VS Code Extension Host test
+    dir: vscode-extension
+    deps:
+      - build
+      - vscode:install
+    env:
+      BTFMT_PATH: ../target/debug/btfmt
+    cmds:
+      - xvfb-run -a npm test
+
   vscode:package:
     desc: Package the VS Code extension (vsix)
     dir: vscode-extension
@@ -155,6 +166,7 @@ tasks:
       - task: lint
       - task: test
       - task: vscode:build
+      - task: vscode:test
 
   all:
     desc: Build and test everything

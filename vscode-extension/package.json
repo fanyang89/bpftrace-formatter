@@ -75,6 +75,8 @@
   },
   "scripts": {
     "compile": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "test": "npm run compile && npm run test:compile && node ./out/test/runTest.js",
+    "test:compile": "esbuild ./src/test/runTest.ts --bundle --outfile=out/test/runTest.js --platform=node --format=cjs && esbuild ./src/test/suite/index.ts --bundle --outfile=out/test/suite/index.js --external:vscode --platform=node --format=cjs",
     "typecheck": "tsc --noEmit",
     "watch": "npm run compile -- --watch",
     "vscode:prepublish": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify"
@@ -85,6 +87,7 @@
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.27.3",
     "typescript": "^5.4.5"
