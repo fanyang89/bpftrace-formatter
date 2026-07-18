@@ -221,6 +221,37 @@ def main():
             env["XDG_CONFIG_HOME"] = str(td_path)
             env["XDG_DATA_HOME"] = str(td_path)
             env["XDG_CACHE_HOME"] = str(td_path)
+            fake_bin = td_path / "bin"
+            fake_bin.mkdir()
+            fake_bpftrace = fake_bin / "bpftrace"
+            fake_bpftrace.write_text(
+                """#!/usr/bin/env python3
+import fnmatch
+import sys
+
+probes = [
+    "tracepoint:sched:sched_switch",
+    "tracepoint:syscalls:sys_enter_openat",
+    "tracepoint:syscalls:sys_enter_openat2",
+]
+if len(sys.argv) == 3 and sys.argv[1] == "-l":
+    for probe in probes:
+        if fnmatch.fnmatch(probe, sys.argv[2]):
+            print(probe)
+elif len(sys.argv) == 3 and sys.argv[1] == "-lv":
+    for probe in probes:
+        if fnmatch.fnmatch(probe, sys.argv[2]):
+            print(probe)
+            print("    int __syscall_nr")
+            print("    const char * filename")
+            print("    int flags")
+else:
+    raise SystemExit(2)
+""",
+                encoding="utf-8",
+            )
+            fake_bpftrace.chmod(0o755)
+            env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
             btfmt_path = os.environ.get("BTFMT_PATH") or str(
                 (pathlib.Path.cwd() / "btfmt").resolve()
             )
@@ -297,6 +328,16 @@ def main():
                         f"expected capability is not enabled: {supported}",
                         resp=resp,
                     )
+            trigger_characters = (capabilities.get("completionProvider") or {}).get(
+                "triggerCharacters"
+            ) or []
+            if not {":", "."}.issubset(trigger_characters):
+                fail(
+                    summary,
+                    "initialize",
+                    "dynamic completion triggers are missing",
+                    resp=resp,
+                )
             record(summary, "initialize", t0)
 
             lsp.notify("initialized", {})
@@ -485,6 +526,56 @@ def main():
                     summary,
                     "context_completion",
                     "scratch completion is not scope-filtered",
+                    resp=resp,
+                )
+
+            rid = lsp.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": offset_to_position(
+                        doc_text_v1, doc_text_v1.index("tracepoint:syscalls") + 15
+                    ),
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            target_completion = resp.get("result") or {}
+            target_items = (
+                target_completion.get("items")
+                if isinstance(target_completion, dict)
+                else target_completion
+            ) or []
+            if "syscalls:sys_enter_openat" not in {
+                item.get("label") for item in target_items
+            }:
+                fail(
+                    summary,
+                    "context_completion",
+                    "probe target completion is missing",
+                    resp=resp,
+                )
+
+            rid = lsp.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": doc_uri},
+                    "position": offset_to_position(
+                        doc_text_v1, doc_text_v1.index("args.filename") + 5
+                    ),
+                },
+            )
+            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
+            field_completion = resp.get("result") or {}
+            field_items = (
+                field_completion.get("items")
+                if isinstance(field_completion, dict)
+                else field_completion
+            ) or []
+            if "filename" not in {item.get("label") for item in field_items}:
+                fail(
+                    summary,
+                    "context_completion",
+                    "args field completion is missing",
                     resp=resp,
                 )
             record(summary, "context_completion", t0)

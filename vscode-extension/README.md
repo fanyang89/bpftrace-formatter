@@ -7,13 +7,15 @@ VS Code extension for formatting bpftrace scripts.
 - Syntax highlighting for `.bt` files
 - Format on save
 - Format document command (`Shift+Alt+F`)
-- Document symbols, variable definitions, references, highlights, and rename
+- Context-aware builtin, probe target, `args` field, variable, map, and macro completion
+- Document symbols, definitions, references, highlights, and rename
 
 ## Installation
 
 Download the `.vsix` file for your platform from [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) and install via "Extensions: Install from VSIX..." command.
 
 The extension includes the btfmt binary - no additional installation required.
+Probe target and `args` field completion uses the `bpftrace` executable from the Extension Host's `PATH`.
 
 ## Settings
 

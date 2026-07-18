@@ -9,7 +9,7 @@ bpftrace 脚本格式化工具，支持 VS Code 集成。
 - 格式化 bpftrace 脚本，统一缩进、间距和结构
 - VS Code 扩展内置二进制，安装即用
 - 支持语言服务器协议 (LSP)，提供悬停文档、补全、导航和重命名
-- 针对 builtin、探针、可见变量、Map 和 Macro 提供上下文补全
+- 针对 builtin、probe target、`args` 字段、可见变量、Map 和 Macro 提供上下文补全
 - 支持 imported Map 和 Macro family 的跨文件定义、引用与重命名
 - 通过 JSON 配置文件自定义格式化规则
 - 保留注释和 shebang
@@ -25,6 +25,7 @@ bpftrace 脚本格式化工具，支持 VS Code 集成。
 3. 选择下载的文件
 
 扩展已内置 btfmt 二进制，无需额外安装。
+probe target 和 `args` 字段补全使用 Extension Host 的 `PATH` 中的 `bpftrace` 可执行文件。
 
 ### CLI 二进制
 
@@ -185,7 +186,7 @@ VS Code 扩展提供：
 - 保存时自动格式化（在 VS Code 设置中启用）
 - 格式化文档命令（`Shift+Alt+F`）
 - bpftrace builtin 悬停文档
-- builtin、provider、probe target、关键字、可见变量、Map、Macro 参数和 imported Macro 的上下文补全
+- builtin、provider、probe target、`args` 字段、关键字、可见变量、Map、Macro 参数和 imported Macro 的上下文补全
 - 探针与 Macro 的文档符号
 - 词法变量、Map 和 Macro family 的定义、引用、高亮与重命名
 - 跨 imported `.bt` 文件的 workspace 导航与重命名

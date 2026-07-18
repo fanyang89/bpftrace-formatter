@@ -1,5 +1,6 @@
 mod catalog;
 mod completion;
+mod probes;
 mod snapshot;
 mod symbols;
 mod workspace;
@@ -74,6 +75,7 @@ struct Backend {
     docs: Arc<Mutex<DocumentStore>>,
     state: Arc<Mutex<ServerState>>,
     workspace: Arc<Mutex<WorkspaceIndex>>,
+    probes: probes::ProbeCatalog,
 }
 
 type PendingDocumentEdits = (
@@ -89,6 +91,7 @@ pub async fn run_server() -> AnyResult<()> {
         docs: Arc::new(Mutex::new(DocumentStore::default())),
         state: Arc::new(Mutex::new(ServerState::default())),
         workspace: Arc::new(Mutex::new(WorkspaceIndex::default())),
+        probes: probes::ProbeCatalog::default(),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
     Ok(())
@@ -126,7 +129,12 @@ impl LanguageServer for Backend {
                 document_formatting_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["$".to_string(), "@".to_string()]),
+                    trigger_characters: Some(vec![
+                        "$".to_string(),
+                        "@".to_string(),
+                        ":".to_string(),
+                        ".".to_string(),
+                    ]),
                     ..CompletionOptions::default()
                 }),
                 document_symbol_provider: Some(OneOf::Left(true)),
@@ -323,12 +331,25 @@ impl LanguageServer for Backend {
             .lock()
             .expect("workspace index poisoned")
             .is_incomplete();
-        Ok(Some(CompletionResponse::List(completion::complete(
+        let mut list = completion::complete(
             &doc,
             params.text_document_position.position,
             workspace_symbols,
             incomplete,
-        ))))
+        );
+        if let Some(request) =
+            probes::completion_request(&doc, params.text_document_position.position)
+        {
+            let outcome = self.probes.complete(request).await;
+            list.is_incomplete |= outcome.list.is_incomplete;
+            list.items.extend(outcome.list.items);
+            if let Some(warning) = outcome.warning {
+                self.client
+                    .log_message(MessageType::WARNING, warning.to_string())
+                    .await;
+            }
+        }
+        Ok(Some(CompletionResponse::List(list)))
     }
 
     async fn goto_definition(

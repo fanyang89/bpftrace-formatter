@@ -25,6 +25,29 @@ export async function run(): Promise<void> {
     'completion provider did not return the matching builtin'
   );
 
+  const dynamicSource =
+    'tracepoint:syscalls:sys_enter_openat { print(args.filename); }\n';
+  const dynamicDocument = await vscode.workspace.openTextDocument({
+    language: 'bpftrace',
+    content: dynamicSource,
+  });
+  const targets = await completionItems(
+    dynamicDocument.uri,
+    dynamicDocument.positionAt(dynamicSource.indexOf('tracepoint:sysc') + 'tracepoint:sysc'.length)
+  );
+  assert.ok(
+    targets.items.some((item) => item.label === 'syscalls:sys_enter_openat'),
+    'completion provider did not return the probe target'
+  );
+  const fields = await completionItems(
+    dynamicDocument.uri,
+    dynamicDocument.positionAt(dynamicSource.indexOf('args.') + 'args.'.length)
+  );
+  assert.ok(
+    fields.items.some((item) => item.label === 'filename'),
+    'completion provider did not return the args field'
+  );
+
   await vscode.commands.executeCommand('btfmt.restartLsp');
   const restartedEdits = await formattingEdits(document.uri);
   assert.ok(restartedEdits.length > 0, 'formatting failed after LSP restart');

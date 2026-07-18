@@ -9,7 +9,7 @@ A formatter for bpftrace scripts with VS Code integration.
 - Format bpftrace scripts with consistent indentation, spacing, and structure
 - VS Code extension with bundled binary - install and use immediately
 - Language Server Protocol (LSP) support with hover, completion, navigation, and rename
-- Context-aware completion for builtins, probes, visible variables, maps, and macros
+- Context-aware completion for builtins, probe targets, `args` fields, visible variables, maps, and macros
 - Cross-file definitions, references, and rename for imported maps and macro families
 - Configurable formatting rules via JSON configuration file
 - Preserves comments and shebangs
@@ -25,6 +25,7 @@ Install the `btfmt-lsp` extension from the [Releases](https://github.com/fanyang
 3. Select the downloaded file
 
 The extension includes the btfmt binary - no additional installation required.
+Probe target and `args` field completion uses the `bpftrace` executable from the Extension Host's `PATH`.
 
 ### CLI Binary
 
@@ -185,7 +186,7 @@ The VS Code extension provides:
 - Format on save (enable in VS Code settings)
 - Format document command (`Shift+Alt+F`)
 - Hover documentation for bpftrace builtins
-- Context-aware completion for builtins, providers, probe targets, keywords, visible variables, maps, macro parameters, and imported macros
+- Context-aware completion for builtins, providers, probe targets, `args` fields, keywords, visible variables, maps, macro parameters, and imported macros
 - Document symbols for probes and macros
 - Definitions, references, highlights, and rename for lexical variables, maps, and macro families
 - Workspace-aware navigation and rename across imported `.bt` files
