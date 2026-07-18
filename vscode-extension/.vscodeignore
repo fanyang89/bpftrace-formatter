@@ -4,6 +4,7 @@
 .nvmrc
 src/**
 node_modules/**
+out/test/**
 tsconfig.json
 **/*.ts
 **/*.map
