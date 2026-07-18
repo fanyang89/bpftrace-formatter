@@ -172,14 +172,6 @@ def apply_text_edits(text: str, edits):
     return out
 
 
-def offset_to_position(text: str, offset: int):
-    # This smoke uses ASCII-only fixtures.
-    before = text[:offset]
-    line = before.count("\n")
-    line_start = before.rfind("\n") + 1
-    return {"line": line, "character": offset - line_start}
-
-
 def fail(summary, step: str, msg: str, **extra):
     summary["ok"] = False
     summary["failed_step"] = step
@@ -267,6 +259,20 @@ def main():
             resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
             if "error" in resp:
                 fail(summary, "initialize", "initialize returned error", resp=resp)
+            capabilities = (resp.get("result") or {}).get("capabilities") or {}
+            for unsupported in (
+                "definitionProvider",
+                "referencesProvider",
+                "documentHighlightProvider",
+                "renameProvider",
+            ):
+                if capabilities.get(unsupported):
+                    fail(
+                        summary,
+                        "initialize",
+                        f"unsafe capability is still enabled: {unsupported}",
+                        resp=resp,
+                    )
             record(summary, "initialize", t0)
 
             lsp.notify("initialized", {})
@@ -371,62 +377,6 @@ def main():
             if completion_count == 0:
                 fail(summary, "completion", "expected completion items", resp=resp)
             record(summary, "completion", t0, count=completion_count)
-
-            position = offset_to_position(doc_text_v1, doc_text_v1.index("$target") + 1)
-            for method, step in [
-                ("textDocument/definition", "definition"),
-                ("textDocument/references", "references"),
-                ("textDocument/documentHighlight", "documentHighlight"),
-            ]:
-                request_params = {
-                    "textDocument": {"uri": doc_uri},
-                    "position": position,
-                }
-                if method == "textDocument/references":
-                    request_params["context"] = {"includeDeclaration": True}
-                rid = lsp.request(
-                    method,
-                    request_params,
-                )
-                resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
-                if "error" in resp:
-                    fail(summary, step, f"{step} returned error", resp=resp)
-                result = resp.get("result") or []
-                if not isinstance(result, list) or len(result) == 0:
-                    fail(summary, step, f"expected non-empty {step} result", resp=resp)
-                record(summary, step, t0, count=len(result))
-
-            rid = lsp.request(
-                "textDocument/prepareRename",
-                {"textDocument": {"uri": doc_uri}, "position": position},
-            )
-            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
-            if "error" in resp:
-                fail(
-                    summary, "prepareRename", "prepareRename returned error", resp=resp
-                )
-            if resp.get("result") is None:
-                fail(
-                    summary, "prepareRename", "expected prepareRename range", resp=resp
-                )
-            record(summary, "prepareRename", t0)
-
-            rid = lsp.request(
-                "textDocument/rename",
-                {
-                    "textDocument": {"uri": doc_uri},
-                    "position": position,
-                    "newName": "renamed",
-                },
-            )
-            resp, _ = lsp.wait_for_response(rid, timeout_s=10.0)
-            if "error" in resp:
-                fail(summary, "rename", "rename returned error", resp=resp)
-            changes = (resp.get("result") or {}).get("changes") or {}
-            edits = changes.get(doc_uri) or []
-            if len(edits) == 0:
-                fail(summary, "rename", "expected rename edits", resp=resp)
-            record(summary, "rename", t0, edits=len(edits))
 
             # Trigger diagnostics with invalid syntax.
             doc_text_v2 = 'tracepoint:syscalls:sys_enter_openat { printf("x");\n'

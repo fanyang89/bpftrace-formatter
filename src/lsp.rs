@@ -1,7 +1,7 @@
 use crate::config::{load_from_base, Config};
 use crate::format::format_source;
 use crate::parse;
-use crate::text::{full_range, identifier_at_position, offset_for_position, range_for_offsets};
+use crate::text::{full_range, identifier_at_position, range_for_offsets};
 use anyhow::Result as AnyResult;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -58,13 +58,6 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions::default()),
                 document_symbol_provider: Some(OneOf::Left(true)),
-                definition_provider: Some(OneOf::Left(true)),
-                references_provider: Some(OneOf::Left(true)),
-                document_highlight_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Right(RenameOptions {
-                    prepare_provider: Some(true),
-                    work_done_progress_options: WorkDoneProgressOptions::default(),
-                })),
                 ..ServerCapabilities::default()
             },
         })
@@ -178,111 +171,6 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(completion_items())))
-    }
-
-    async fn goto_definition(
-        &self,
-        params: GotoDefinitionParams,
-    ) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-        let Some(doc) = self.doc(&uri) else {
-            return Ok(None);
-        };
-        let Some(symbol) = symbol_at_position(&doc.text, position) else {
-            return Ok(None);
-        };
-        let Some(occurrence) = symbol_occurrences(&doc.text, &symbol.text)
-            .into_iter()
-            .next()
-        else {
-            return Ok(None);
-        };
-        Ok(Some(GotoDefinitionResponse::Array(vec![Location {
-            uri,
-            range: occurrence.range,
-        }])))
-    }
-
-    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let uri = params.text_document_position.text_document.uri;
-        let position = params.text_document_position.position;
-        let Some(doc) = self.doc(&uri) else {
-            return Ok(Some(Vec::new()));
-        };
-        let Some(symbol) = symbol_at_position(&doc.text, position) else {
-            return Ok(Some(Vec::new()));
-        };
-        let locations = symbol_occurrences(&doc.text, &symbol.text)
-            .into_iter()
-            .map(|occurrence| Location {
-                uri: uri.clone(),
-                range: occurrence.range,
-            })
-            .collect();
-        Ok(Some(locations))
-    }
-
-    async fn document_highlight(
-        &self,
-        params: DocumentHighlightParams,
-    ) -> Result<Option<Vec<DocumentHighlight>>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-        let Some(doc) = self.doc(&uri) else {
-            return Ok(Some(Vec::new()));
-        };
-        let Some(symbol) = symbol_at_position(&doc.text, position) else {
-            return Ok(Some(Vec::new()));
-        };
-        let highlights = symbol_occurrences(&doc.text, &symbol.text)
-            .into_iter()
-            .map(|occurrence| DocumentHighlight {
-                range: occurrence.range,
-                kind: Some(DocumentHighlightKind::TEXT),
-            })
-            .collect();
-        Ok(Some(highlights))
-    }
-
-    async fn prepare_rename(
-        &self,
-        params: TextDocumentPositionParams,
-    ) -> Result<Option<PrepareRenameResponse>> {
-        let Some(doc) = self.doc(&params.text_document.uri) else {
-            return Ok(None);
-        };
-        Ok(symbol_at_position(&doc.text, params.position)
-            .map(|symbol| PrepareRenameResponse::Range(symbol.range)))
-    }
-
-    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let uri = params.text_document_position.text_document.uri;
-        let position = params.text_document_position.position;
-        let Some(doc) = self.doc(&uri) else {
-            return Ok(None);
-        };
-        let Some(symbol) = symbol_at_position(&doc.text, position) else {
-            return Ok(None);
-        };
-        let replacement = match normalize_rename(&params.new_name, symbol.sigil) {
-            Some(replacement) => replacement,
-            None => return Ok(None),
-        };
-        let edits: Vec<TextEdit> = symbol_occurrences(&doc.text, &symbol.text)
-            .into_iter()
-            .map(|occurrence| TextEdit {
-                range: occurrence.range,
-                new_text: replacement.clone(),
-            })
-            .collect();
-        let mut changes = HashMap::new();
-        changes.insert(uri, edits);
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }))
     }
 }
 
@@ -426,111 +314,6 @@ fn document_symbols(text: &str) -> Vec<DocumentSymbol> {
             Some(symbol)
         })
         .collect()
-}
-
-#[derive(Debug, Clone)]
-struct SymbolOccurrence {
-    text: String,
-    sigil: char,
-    start: usize,
-    end: usize,
-    range: Range,
-}
-
-fn symbol_at_position(text: &str, position: Position) -> Option<SymbolOccurrence> {
-    let offset = offset_for_position(text, position);
-    symbol_occurrences(text, "")
-        .into_iter()
-        .filter(|occurrence| occurrence.start <= offset && offset <= occurrence.end)
-        .min_by_key(|occurrence| occurrence.end - occurrence.start)
-}
-
-fn symbol_occurrences(text: &str, needle: &str) -> Vec<SymbolOccurrence> {
-    let bytes = text.as_bytes();
-    let mut occurrences = Vec::new();
-    let mut idx = 0;
-
-    while idx < bytes.len() {
-        if text[idx..].starts_with("//") {
-            idx = read_line_end(text, idx);
-            continue;
-        }
-        if matches!(bytes[idx], b'\'' | b'\"') {
-            idx = read_string_end(bytes, idx, bytes[idx]);
-            continue;
-        }
-
-        if matches!(bytes[idx], b'$' | b'@')
-            && bytes.get(idx + 1).is_some_and(|byte| is_ident_start(*byte))
-        {
-            let start = idx;
-            idx += 2;
-            while bytes.get(idx).is_some_and(|byte| is_ident_continue(*byte)) {
-                idx += 1;
-            }
-            let symbol_text = &text[start..idx];
-            if needle.is_empty() || symbol_text == needle {
-                occurrences.push(SymbolOccurrence {
-                    text: symbol_text.to_string(),
-                    sigil: bytes[start] as char,
-                    start,
-                    end: idx,
-                    range: range_for_offsets(text, start, idx),
-                });
-            }
-            continue;
-        }
-
-        idx += text[idx..].chars().next().map_or(1, char::len_utf8);
-    }
-
-    occurrences
-}
-
-fn normalize_rename(new_name: &str, sigil: char) -> Option<String> {
-    let mut name = new_name.trim();
-    if name.starts_with(['$', '@']) {
-        if !name.starts_with(sigil) {
-            return None;
-        }
-        name = &name[1..];
-    }
-    let mut bytes = name.bytes();
-    let first = bytes.next()?;
-    if !is_ident_start(first) || !bytes.all(is_ident_continue) {
-        return None;
-    }
-    Some(format!("{sigil}{name}"))
-}
-
-fn read_line_end(text: &str, start: usize) -> usize {
-    text[start..]
-        .find('\n')
-        .map(|rel| start + rel)
-        .unwrap_or(text.len())
-}
-
-fn read_string_end(bytes: &[u8], start: usize, quote: u8) -> usize {
-    let mut idx = start + 1;
-    while idx < bytes.len() {
-        if bytes[idx] == b'\\' {
-            idx += 2;
-            continue;
-        }
-        if bytes[idx] == quote {
-            return idx + 1;
-        }
-        idx += 1;
-    }
-    bytes.len()
-}
-
-fn is_ident_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_'
-}
-
-fn is_ident_continue(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn completion_items() -> Vec<CompletionItem> {
