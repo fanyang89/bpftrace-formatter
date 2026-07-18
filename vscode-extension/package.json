@@ -20,6 +20,16 @@
     "onLanguage:bpftrace",
     "onCommand:btfmt.restartLsp"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Formatting uses the bundled btfmt server in Restricted Mode.",
+      "restrictedConfigurations": [
+        "btfmt.serverPath",
+        "btfmt.configPath"
+      ]
+    }
+  },
   "contributes": {
     "commands": [
       {
