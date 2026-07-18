@@ -340,14 +340,12 @@ impl LanguageServer for Backend {
         if let Some(request) =
             probes::completion_request(&doc, params.text_document_position.position)
         {
-            let outcome = self.probes.complete(request).await;
-            list.is_incomplete |= outcome.list.is_incomplete;
-            list.items.extend(outcome.list.items);
-            if let Some(warning) = outcome.warning {
-                self.client
-                    .log_message(MessageType::WARNING, warning.to_string())
-                    .await;
-            }
+            let dynamic = self
+                .probes
+                .complete(request, self.workspace_probe_metadata(&uri))
+                .await;
+            list.is_incomplete |= dynamic.is_incomplete;
+            list.items.extend(dynamic.items);
         }
         Ok(Some(CompletionResponse::List(list)))
     }
@@ -672,6 +670,24 @@ impl Backend {
             symbols.extend(index.global_completion_symbols());
         }
         symbols
+    }
+
+    fn workspace_probe_metadata(&self, origin: &Url) -> probes::WorkspaceMetadata {
+        let mut files = self
+            .workspace
+            .lock()
+            .expect("workspace index poisoned")
+            .program_files(origin);
+        if !files.contains(origin) {
+            files.push(origin.clone());
+        }
+        let mut metadata = probes::WorkspaceMetadata::default();
+        for uri in files {
+            if let Some(snapshot) = self.effective_snapshot(&uri) {
+                metadata.add_snapshot(&snapshot);
+            }
+        }
+        metadata
     }
 
     fn rename_global(

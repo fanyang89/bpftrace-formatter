@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { runTests } from '@vscode/test-electron';
 
@@ -21,28 +20,6 @@ async function main(): Promise<void> {
   fs.mkdirSync(binDir, { recursive: true });
   fs.copyFileSync(path.resolve(source), bundledBinary);
   fs.chmodSync(bundledBinary, 0o755);
-  const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-test-bin-'));
-  const fakeBpftrace = path.join(fakeBinDir, 'bpftrace');
-  fs.writeFileSync(
-    fakeBpftrace,
-    `#!/usr/bin/env node
-const probes = [
-  'tracepoint:sched:sched_switch',
-  'tracepoint:syscalls:sys_enter_openat',
-];
-if (process.argv[2] === '-l') {
-  for (const probe of probes) console.log(probe);
-} else if (process.argv[2] === '-lv') {
-  console.log('tracepoint:syscalls:sys_enter_openat');
-  console.log('    int __syscall_nr');
-  console.log('    const char * filename');
-} else {
-  process.exit(2);
-}
-`
-  );
-  fs.chmodSync(fakeBpftrace, 0o755);
-  process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ''}`;
 
   try {
     await runTests({
@@ -53,7 +30,6 @@ if (process.argv[2] === '-l') {
   } finally {
     fs.rmSync(bundledBinary, { force: true });
     fs.rmdirSync(binDir);
-    fs.rmSync(fakeBinDir, { recursive: true, force: true });
   }
 }
 

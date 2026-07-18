@@ -221,37 +221,6 @@ def main():
             env["XDG_CONFIG_HOME"] = str(td_path)
             env["XDG_DATA_HOME"] = str(td_path)
             env["XDG_CACHE_HOME"] = str(td_path)
-            fake_bin = td_path / "bin"
-            fake_bin.mkdir()
-            fake_bpftrace = fake_bin / "bpftrace"
-            fake_bpftrace.write_text(
-                """#!/usr/bin/env python3
-import fnmatch
-import sys
-
-probes = [
-    "tracepoint:sched:sched_switch",
-    "tracepoint:syscalls:sys_enter_openat",
-    "tracepoint:syscalls:sys_enter_openat2",
-]
-if len(sys.argv) == 3 and sys.argv[1] == "-l":
-    for probe in probes:
-        if fnmatch.fnmatch(probe, sys.argv[2]):
-            print(probe)
-elif len(sys.argv) == 3 and sys.argv[1] == "-lv":
-    for probe in probes:
-        if fnmatch.fnmatch(probe, sys.argv[2]):
-            print(probe)
-            print("    int __syscall_nr")
-            print("    const char * filename")
-            print("    int flags")
-else:
-    raise SystemExit(2)
-""",
-                encoding="utf-8",
-            )
-            fake_bpftrace.chmod(0o755)
-            env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
             btfmt_path = os.environ.get("BTFMT_PATH") or str(
                 (pathlib.Path.cwd() / "btfmt").resolve()
             )

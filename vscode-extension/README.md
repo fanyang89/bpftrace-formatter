@@ -15,7 +15,7 @@ VS Code extension for formatting bpftrace scripts.
 Download the `.vsix` file for your platform from [Releases](https://github.com/fanyang89/bpftrace-formatter/releases) and install via "Extensions: Install from VSIX..." command.
 
 The extension includes the btfmt binary - no additional installation required.
-Probe target and `args` field completion uses the `bpftrace` executable from the Extension Host's `PATH`.
+Probe target and `args` field completion uses workspace scripts, portable catalogs, and readable kernel metadata without requiring root access.
 
 ## Settings
 

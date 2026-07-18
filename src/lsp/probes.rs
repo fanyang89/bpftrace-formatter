@@ -1,55 +1,46 @@
 use super::snapshot::DocumentSnapshot;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::process::Command;
-use tokio::sync::Mutex;
-use tokio::time::timeout;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use tokio::task;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionTextEdit, Documentation,
     Position, Range, TextEdit,
 };
 use tree_sitter::Node;
 
-const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
-const SUCCESS_TTL: Duration = Duration::from_secs(30);
-const FAILURE_TTL: Duration = Duration::from_secs(5);
-const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ITEMS: usize = 200;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum QueryKind {
-    Targets,
-    Fields,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct QueryKey {
-    kind: QueryKind,
-    pattern: String,
-}
-
-#[derive(Debug, Clone)]
-enum QueryResult {
-    Success(Arc<str>),
-    Failure(Arc<str>),
-}
-
-#[derive(Debug, Clone)]
-struct CacheEntry {
-    created: Instant,
-    result: QueryResult,
-}
-
-impl CacheEntry {
-    fn is_fresh(&self) -> bool {
-        let ttl = match self.result {
-            QueryResult::Success(_) => SUCCESS_TTL,
-            QueryResult::Failure(_) => FAILURE_TTL,
-        };
-        self.created.elapsed() < ttl
-    }
-}
+const STATIC_TARGETS: &[(&str, &str)] = &[
+    ("hardware:branch-instructions", "hardware event"),
+    ("hardware:branch-misses", "hardware event"),
+    ("hardware:bus-cycles", "hardware event"),
+    ("hardware:cache-misses", "hardware event"),
+    ("hardware:cache-references", "hardware event"),
+    ("hardware:cpu-cycles", "hardware event"),
+    ("hardware:instructions", "hardware event"),
+    ("hardware:ref-cycles", "hardware event"),
+    ("hardware:stalled-cycles-backend", "hardware event"),
+    ("hardware:stalled-cycles-frontend", "hardware event"),
+    ("interval:ms:100", "interval probe"),
+    ("interval:s:1", "interval probe"),
+    ("interval:us:100", "interval probe"),
+    ("profile:hz:99", "profile probe"),
+    ("profile:ms:10", "profile probe"),
+    ("profile:s:1", "profile probe"),
+    ("software:alignment-faults", "software event"),
+    ("software:bpf-output", "software event"),
+    ("software:context-switches", "software event"),
+    ("software:cpu-clock", "software event"),
+    ("software:cpu-migrations", "software event"),
+    ("software:dummy", "software event"),
+    ("software:emulation-faults", "software event"),
+    ("software:major-faults", "software event"),
+    ("software:minor-faults", "software event"),
+    ("software:page-faults", "software event"),
+    ("software:task-clock", "software event"),
+];
 
 #[derive(Debug, Clone)]
 pub(super) enum CompletionRequest {
@@ -65,111 +56,186 @@ pub(super) enum CompletionRequest {
     },
 }
 
-impl CompletionRequest {
-    fn query_key(&self) -> QueryKey {
-        match self {
-            Self::ProbeTargets {
-                provider,
-                target_prefix,
-                ..
-            } => QueryKey {
-                kind: QueryKind::Targets,
-                pattern: format!("{provider}:{target_prefix}*"),
-            },
-            Self::ArgsFields { probes, .. } => QueryKey {
-                kind: QueryKind::Fields,
-                pattern: probes.clone(),
-            },
-        }
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TargetCandidate {
+    full_name: String,
+    detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FieldCandidate {
+    probe: String,
+    declaration: String,
+    name: String,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct WorkspaceMetadata {
+    targets: Vec<TargetCandidate>,
+    fields: HashMap<String, Vec<FieldCandidate>>,
+}
+
+impl WorkspaceMetadata {
+    pub(super) fn add_snapshot(&mut self, snapshot: &DocumentSnapshot) {
+        let Some(tree) = snapshot.tree.as_ref() else {
+            return;
+        };
+        let text = snapshot.text.as_ref();
+        walk(tree.root_node(), &mut |node| {
+            if node.kind() == "probe" {
+                let full_name = text[node.byte_range()].trim().to_string();
+                if full_name.contains(':') {
+                    self.targets.push(TargetCandidate {
+                        full_name,
+                        detail: "workspace probe".to_string(),
+                    });
+                }
+                return;
+            }
+            if node.kind() != "field_expression"
+                || node
+                    .child_by_field_name("argument")
+                    .is_none_or(|argument| argument.kind() != "args_keyword")
+            {
+                return;
+            }
+            let Some(field) = node.child_by_field_name("field") else {
+                return;
+            };
+            let Some(action_block) = ancestor(node, "action_block") else {
+                return;
+            };
+            let Some(probes_list) = named_child(action_block, "probes_list") else {
+                return;
+            };
+            let name = text[field.byte_range()].to_string();
+            let mut cursor = probes_list.walk();
+            for probe in probes_list
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() == "probe")
+            {
+                let probe = text[probe.byte_range()].trim().to_string();
+                self.fields
+                    .entry(probe.clone())
+                    .or_default()
+                    .push(FieldCandidate {
+                        probe,
+                        declaration: format!("{name} (observed in workspace)"),
+                        name: name.clone(),
+                    });
+            }
+        });
     }
 }
 
 #[derive(Debug, Default)]
-pub(super) struct ProbeCatalog {
-    cache: Mutex<HashMap<QueryKey, CacheEntry>>,
-    reported_errors: Mutex<HashSet<Arc<str>>>,
+struct KernelMetadataCache {
+    targets: Option<Vec<TargetCandidate>>,
+    fields: HashMap<String, Vec<FieldCandidate>>,
 }
 
-#[derive(Debug)]
-pub(super) struct CompletionOutcome {
-    pub list: CompletionList,
-    pub warning: Option<Arc<str>>,
+#[derive(Debug, Clone, Default)]
+pub(super) struct ProbeCatalog {
+    cache: Arc<Mutex<KernelMetadataCache>>,
 }
 
 impl ProbeCatalog {
-    pub(super) async fn complete(&self, request: CompletionRequest) -> CompletionOutcome {
-        let key = request.query_key();
-        match self.query(key).await {
-            QueryResult::Success(output) => CompletionOutcome {
-                list: completion_from_output(&request, &output),
-                warning: None,
-            },
-            QueryResult::Failure(error) => {
-                let warning = self
-                    .reported_errors
-                    .lock()
-                    .await
-                    .insert(Arc::clone(&error))
-                    .then_some(error);
-                CompletionOutcome {
-                    list: CompletionList {
-                        is_incomplete: false,
-                        items: Vec::new(),
-                    },
-                    warning,
-                }
+    pub(super) async fn complete(
+        &self,
+        request: CompletionRequest,
+        workspace: WorkspaceMetadata,
+    ) -> CompletionList {
+        match request {
+            CompletionRequest::ProbeTargets {
+                provider,
+                target_prefix,
+                range,
+            } => {
+                let mut candidates = workspace.targets;
+                candidates.extend(self.kernel_targets().await);
+                candidates.extend(STATIC_TARGETS.iter().map(|(full_name, detail)| {
+                    TargetCandidate {
+                        full_name: (*full_name).to_string(),
+                        detail: (*detail).to_string(),
+                    }
+                }));
+                target_completions(&provider, &target_prefix, range, candidates)
+            }
+            CompletionRequest::ArgsFields {
+                probes,
+                field_prefix,
+                range,
+            } => {
+                let mut candidates = probes
+                    .split(',')
+                    .flat_map(|probe| {
+                        workspace
+                            .fields
+                            .get(probe.trim())
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                    })
+                    .collect::<Vec<_>>();
+                candidates.extend(self.kernel_fields(&probes).await);
+                field_completions(&field_prefix, range, candidates)
             }
         }
     }
 
-    async fn query(&self, key: QueryKey) -> QueryResult {
-        if let Some(result) = self
+    async fn kernel_targets(&self) -> Vec<TargetCandidate> {
+        if let Some(targets) = self
             .cache
             .lock()
-            .await
-            .get(&key)
-            .filter(|entry| entry.is_fresh())
-            .map(|entry| entry.result.clone())
+            .expect("probe metadata cache poisoned")
+            .targets
+            .clone()
         {
-            return result;
+            return targets;
         }
+        let targets = task::spawn_blocking(load_kernel_targets)
+            .await
+            .unwrap_or_default();
+        self.cache
+            .lock()
+            .expect("probe metadata cache poisoned")
+            .targets = Some(targets.clone());
+        targets
+    }
 
-        let flag = match key.kind {
-            QueryKind::Targets => "-l",
-            QueryKind::Fields => "-lv",
+    async fn kernel_fields(&self, probes: &str) -> Vec<FieldCandidate> {
+        let probe_names = probes
+            .split(',')
+            .map(str::trim)
+            .filter(|probe| !probe.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let missing = {
+            let cache = self.cache.lock().expect("probe metadata cache poisoned");
+            probe_names
+                .iter()
+                .filter(|probe| !cache.fields.contains_key(*probe))
+                .cloned()
+                .collect::<Vec<_>>()
         };
-        let mut command = Command::new("bpftrace");
-        command.arg(flag).arg(&key.pattern).kill_on_drop(true);
-        let result = match timeout(QUERY_TIMEOUT, command.output()).await {
-            Err(_) => QueryResult::Failure(Arc::from(format!(
-                "bpftrace query timed out after {} seconds",
-                QUERY_TIMEOUT.as_secs()
-            ))),
-            Ok(Err(error)) => QueryResult::Failure(Arc::from(format!(
-                "cannot run bpftrace for completion: {error}"
-            ))),
-            Ok(Ok(output)) if !output.status.success() => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                QueryResult::Failure(Arc::from(format!(
-                    "bpftrace completion query failed: {}",
-                    stderr.trim()
-                )))
+        if !missing.is_empty() {
+            let probes_to_load = missing.clone();
+            let loaded = task::spawn_blocking(move || load_kernel_fields(&probes_to_load))
+                .await
+                .unwrap_or_default();
+            let mut cache = self.cache.lock().expect("probe metadata cache poisoned");
+            for probe in missing {
+                cache.fields.insert(
+                    probe.clone(),
+                    loaded.get(&probe).cloned().unwrap_or_default(),
+                );
             }
-            Ok(Ok(output)) if output.stdout.len() > MAX_OUTPUT_BYTES => QueryResult::Failure(
-                Arc::from("bpftrace completion query returned too much data"),
-            ),
-            Ok(Ok(output)) => QueryResult::Success(Arc::from(
-                String::from_utf8_lossy(&output.stdout).into_owned(),
-            )),
-        };
-        self.cache.lock().await.insert(
-            key,
-            CacheEntry {
-                created: Instant::now(),
-                result: result.clone(),
-            },
-        );
-        result
+        }
+        let cache = self.cache.lock().expect("probe metadata cache poisoned");
+        probe_names
+            .iter()
+            .flat_map(|probe| cache.fields.get(probe).into_iter().flatten().cloned())
+            .collect()
     }
 }
 
@@ -195,10 +261,7 @@ fn probe_targets_request(snapshot: &DocumentSnapshot, offset: usize) -> Option<C
     let start = clause_start + whitespace;
     let candidate = &text[start..offset];
     let (provider, target_prefix) = candidate.split_once(':')?;
-    if !is_probe_provider(provider)
-        || target_prefix.chars().any(char::is_whitespace)
-        || (!allows_empty_target(provider) && target_prefix.len() < 2)
-    {
+    if !is_probe_provider(provider) || target_prefix.chars().any(char::is_whitespace) {
         return None;
     }
 
@@ -251,13 +314,18 @@ fn enclosing_probes(snapshot: &DocumentSnapshot, offset: usize) -> Option<String
     let text = snapshot.text.as_ref();
     let tree = snapshot.tree.as_ref()?;
     let start = offset.saturating_sub(1);
-    let mut node = tree
+    let node = tree
         .root_node()
         .descendant_for_byte_range(start, offset.max(start + 1).min(text.len()))?;
+    let action_block = ancestor(node, "action_block")?;
+    let probes = named_child(action_block, "probes_list")?;
+    Some(text[probes.byte_range()].trim().to_string())
+}
+
+fn ancestor<'tree>(mut node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     loop {
-        if node.kind() == "action_block" {
-            let probes = named_child(node, "probes_list")?;
-            return Some(text[probes.byte_range()].trim().to_string());
+        if node.kind() == kind {
+            return Some(node);
         }
         node = node.parent()?;
     }
@@ -269,6 +337,14 @@ fn named_child<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
         .named_children(&mut cursor)
         .find(|child| child.kind() == kind);
     child
+}
+
+fn walk(node: Node<'_>, visit: &mut impl FnMut(Node<'_>)) {
+    visit(node);
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        walk(child, visit);
+    }
 }
 
 fn is_probe_provider(provider: &str) -> bool {
@@ -294,13 +370,6 @@ fn is_probe_provider(provider: &str) -> bool {
     )
 }
 
-fn allows_empty_target(provider: &str) -> bool {
-    matches!(
-        provider,
-        "tracepoint" | "rawtracepoint" | "hardware" | "software"
-    )
-}
-
 fn is_probe_target_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
         || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'*' | b'?' | b'+')
@@ -310,45 +379,37 @@ fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
-fn completion_from_output(request: &CompletionRequest, output: &str) -> CompletionList {
-    match request {
-        CompletionRequest::ProbeTargets {
-            provider,
-            target_prefix,
-            range,
-        } => target_completions(provider, target_prefix, *range, output),
-        CompletionRequest::ArgsFields {
-            field_prefix,
-            range,
-            ..
-        } => field_completions(field_prefix, *range, output),
-    }
-}
-
-fn target_completions(provider: &str, prefix: &str, range: Range, output: &str) -> CompletionList {
+fn target_completions(
+    provider: &str,
+    prefix: &str,
+    range: Range,
+    candidates: Vec<TargetCandidate>,
+) -> CompletionList {
     let expected = format!("{provider}:");
-    let mut targets: Vec<_> = output
-        .lines()
-        .map(str::trim)
-        .filter_map(|line| line.strip_prefix(&expected))
-        .filter(|target| target.starts_with(prefix))
-        .collect();
-    targets.sort_unstable();
-    targets.dedup();
+    let mut seen = HashSet::new();
+    let mut targets = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let target = candidate.full_name.strip_prefix(&expected)?.to_string();
+            (target.starts_with(prefix) && seen.insert(target.clone()))
+                .then_some((target, candidate.detail))
+        })
+        .collect::<Vec<_>>();
+    targets.sort_by(|left, right| left.0.cmp(&right.0));
     let is_incomplete = targets.len() > MAX_ITEMS;
     targets.truncate(MAX_ITEMS);
     let items = targets
         .into_iter()
         .enumerate()
-        .map(|(index, target)| CompletionItem {
-            label: target.to_string(),
+        .map(|(index, (target, detail))| CompletionItem {
+            label: target.clone(),
             kind: Some(CompletionItemKind::EVENT),
-            detail: Some(format!("{provider}:{target}")),
-            filter_text: Some(target.to_string()),
+            detail: Some(detail),
+            filter_text: Some(target.clone()),
             sort_text: Some(format!("{index:06}")),
             text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                 range,
-                new_text: target.to_string(),
+                new_text: target,
             })),
             ..CompletionItem::default()
         })
@@ -359,32 +420,31 @@ fn target_completions(provider: &str, prefix: &str, range: Range, output: &str) 
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct ProbeField<'a> {
-    probe: &'a str,
-    declaration: &'a str,
-    name: &'a str,
-}
-
-fn field_completions(prefix: &str, range: Range, output: &str) -> CompletionList {
-    let mut fields = parse_fields(output);
-    fields.retain(|field| field.name.starts_with(prefix));
-    fields.sort_by_key(|field| field.name);
-    fields.dedup_by_key(|field| field.name);
+fn field_completions(
+    prefix: &str,
+    range: Range,
+    candidates: Vec<FieldCandidate>,
+) -> CompletionList {
+    let mut seen = HashSet::new();
+    let mut fields = candidates
+        .into_iter()
+        .filter(|field| field.name.starts_with(prefix) && seen.insert(field.name.clone()))
+        .collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.name.cmp(&right.name));
     let is_incomplete = fields.len() > MAX_ITEMS;
     fields.truncate(MAX_ITEMS);
     let items = fields
         .into_iter()
         .enumerate()
         .map(|(index, field)| CompletionItem {
-            label: field.name.to_string(),
+            label: field.name.clone(),
             kind: Some(CompletionItemKind::FIELD),
-            detail: Some(field.declaration.to_string()),
+            detail: Some(field.declaration),
             documentation: Some(Documentation::String(format!("Probe: `{}`", field.probe))),
             sort_text: Some(format!("{index:06}")),
             text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                 range,
-                new_text: field.name.to_string(),
+                new_text: field.name,
             })),
             ..CompletionItem::default()
         })
@@ -395,28 +455,117 @@ fn field_completions(prefix: &str, range: Range, output: &str) -> CompletionList
     }
 }
 
-fn parse_fields(output: &str) -> Vec<ProbeField<'_>> {
-    let mut probe = "";
-    let mut fields = Vec::new();
-    for line in output.lines() {
-        let declaration = line.trim();
-        if declaration.is_empty() {
-            continue;
-        }
-        if !line.starts_with(char::is_whitespace) {
-            probe = declaration;
-            continue;
-        }
-        let Some(name) = declaration_name(declaration) else {
+fn load_kernel_targets() -> Vec<TargetCandidate> {
+    let mut targets = event_root()
+        .map(|root| load_tracepoint_targets(&root))
+        .unwrap_or_default();
+    targets.extend(load_kprobe_targets());
+    targets
+}
+
+fn event_root() -> Option<PathBuf> {
+    [
+        "/sys/kernel/events",
+        "/sys/kernel/tracing/events",
+        "/sys/kernel/debug/tracing/events",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|path| fs::read_dir(path).is_ok())
+}
+
+fn load_tracepoint_targets(root: &Path) -> Vec<TargetCandidate> {
+    let mut targets = Vec::new();
+    let Ok(subsystems) = fs::read_dir(root) else {
+        return targets;
+    };
+    for subsystem in subsystems.flatten() {
+        let Ok(file_type) = subsystem.file_type() else {
             continue;
         };
-        fields.push(ProbeField {
-            probe,
-            declaration,
-            name,
-        });
+        if !file_type.is_dir() {
+            continue;
+        }
+        let subsystem_name = subsystem.file_name().to_string_lossy().into_owned();
+        let Ok(events) = fs::read_dir(subsystem.path()) else {
+            continue;
+        };
+        for event in events.flatten() {
+            if !event.path().join("format").is_file() {
+                continue;
+            }
+            let event_name = event.file_name().to_string_lossy().into_owned();
+            targets.push(TargetCandidate {
+                full_name: format!("tracepoint:{subsystem_name}:{event_name}"),
+                detail: "kernel tracepoint".to_string(),
+            });
+        }
     }
-    fields
+    targets
+}
+
+fn load_kprobe_targets() -> Vec<TargetCandidate> {
+    [
+        "/sys/kernel/tracing/available_filter_functions",
+        "/sys/kernel/debug/tracing/available_filter_functions",
+    ]
+    .into_iter()
+    .find_map(|path| fs::read_to_string(path).ok())
+    .map(|text| {
+        text.lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .map(|function| TargetCandidate {
+                full_name: format!("kprobe:{function}"),
+                detail: "kernel function".to_string(),
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn load_kernel_fields(probes: &[String]) -> HashMap<String, Vec<FieldCandidate>> {
+    let Some(root) = event_root() else {
+        return HashMap::new();
+    };
+    probes
+        .iter()
+        .filter_map(|probe| {
+            let (_, target) = probe.split_once("tracepoint:")?;
+            let (subsystem, event) = target.split_once(':')?;
+            if !safe_component(subsystem) || !safe_component(event) {
+                return None;
+            }
+            let format =
+                fs::read_to_string(root.join(subsystem).join(event).join("format")).ok()?;
+            Some((probe.clone(), parse_tracepoint_fields(probe, &format)))
+        })
+        .collect()
+}
+
+fn safe_component(component: &str) -> bool {
+    !component.is_empty()
+        && component
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+fn parse_tracepoint_fields(probe: &str, format: &str) -> Vec<FieldCandidate> {
+    format
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("field:"))
+        .filter_map(|line| {
+            line.split_once(';')
+                .map(|(declaration, _)| declaration.trim())
+        })
+        .filter_map(|declaration| {
+            let name = declaration_name(declaration)?;
+            (!name.starts_with("common_")).then(|| FieldCandidate {
+                probe: probe.to_string(),
+                declaration: declaration.to_string(),
+                name: name.to_string(),
+            })
+        })
+        .collect()
 }
 
 fn declaration_name(declaration: &str) -> Option<&str> {
@@ -479,38 +628,61 @@ mod tests {
     }
 
     #[test]
-    fn parses_target_and_field_output() {
-        let range = Range::default();
-        let targets = target_completions(
-            "tracepoint",
-            "sysc",
-            range,
-            "tracepoint:sched:sched_switch\ntracepoint:syscalls:sys_enter_openat\n",
-        );
-        assert_eq!(targets.items.len(), 1);
-        assert_eq!(targets.items[0].label, "syscalls:sys_enter_openat");
-
-        let output = "tracepoint:syscalls:sys_enter_openat\n    int __syscall_nr\n    const char * filename\n    char comm[16]\n";
-        let fields = parse_fields(output);
+    fn extracts_workspace_targets_and_fields() {
+        let source = "tracepoint:syscalls:sys_enter_openat { print(args.filename); }";
+        let (snapshot, _) = DocumentSnapshot::analyze(source.to_string(), Some(1));
+        let mut metadata = WorkspaceMetadata::default();
+        metadata.add_snapshot(&snapshot);
+        assert!(metadata
+            .targets
+            .iter()
+            .any(|target| { target.full_name == "tracepoint:syscalls:sys_enter_openat" }));
         assert_eq!(
-            fields,
-            vec![
-                ProbeField {
-                    probe: "tracepoint:syscalls:sys_enter_openat",
-                    declaration: "int __syscall_nr",
-                    name: "__syscall_nr",
-                },
-                ProbeField {
-                    probe: "tracepoint:syscalls:sys_enter_openat",
-                    declaration: "const char * filename",
-                    name: "filename",
-                },
-                ProbeField {
-                    probe: "tracepoint:syscalls:sys_enter_openat",
-                    declaration: "char comm[16]",
-                    name: "comm",
-                },
-            ]
+            metadata.fields["tracepoint:syscalls:sys_enter_openat"][0].name,
+            "filename"
         );
+    }
+
+    #[test]
+    fn reads_tracepoint_metadata_without_external_commands() {
+        let temp = tempfile::tempdir().unwrap();
+        let event = temp.path().join("syscalls/sys_enter_openat");
+        fs::create_dir_all(&event).unwrap();
+        fs::write(
+            event.join("format"),
+            "format:\n\tfield:unsigned short common_type; offset:0;\n\tfield:const char * filename; offset:8;\n\tfield:int flags; offset:16;\n",
+        )
+        .unwrap();
+
+        let targets = load_tracepoint_targets(temp.path());
+        assert_eq!(targets[0].full_name, "tracepoint:syscalls:sys_enter_openat");
+        let fields = parse_tracepoint_fields(
+            "tracepoint:syscalls:sys_enter_openat",
+            &fs::read_to_string(event.join("format")).unwrap(),
+        );
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["filename", "flags"]
+        );
+    }
+
+    #[test]
+    fn static_targets_cover_unprivileged_environments() {
+        let completions = target_completions(
+            "hardware",
+            "cpu",
+            Range::default(),
+            STATIC_TARGETS
+                .iter()
+                .map(|(full_name, detail)| TargetCandidate {
+                    full_name: (*full_name).to_string(),
+                    detail: (*detail).to_string(),
+                })
+                .collect(),
+        );
+        assert_eq!(completions.items[0].label, "cpu-cycles");
     }
 }

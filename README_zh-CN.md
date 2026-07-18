@@ -25,7 +25,7 @@ bpftrace 脚本格式化工具，支持 VS Code 集成。
 3. 选择下载的文件
 
 扩展已内置 btfmt 二进制，无需额外安装。
-probe target 和 `args` 字段补全使用 Extension Host 的 `PATH` 中的 `bpftrace` 可执行文件。
+probe target 和 `args` 字段补全使用 workspace 脚本、可移植 catalog 和当前用户可读的内核 metadata，无需 root 权限。
 
 ### CLI 二进制
 
