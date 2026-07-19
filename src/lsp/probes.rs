@@ -60,6 +60,7 @@ pub(super) enum CompletionRequest {
 struct TargetCandidate {
     full_name: String,
     detail: String,
+    priority: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +89,7 @@ impl WorkspaceMetadata {
                     self.targets.push(TargetCandidate {
                         full_name,
                         detail: "workspace probe".to_string(),
+                        priority: 0,
                     });
                 }
                 return;
@@ -160,6 +162,7 @@ impl ProbeCatalog {
                     TargetCandidate {
                         full_name: (*full_name).to_string(),
                         detail: (*detail).to_string(),
+                        priority: 0,
                     }
                 }));
                 target_completions(&provider, &target_prefix, range, candidates)
@@ -396,17 +399,20 @@ fn target_completions(
         .into_iter()
         .filter_map(|candidate| {
             let target = candidate.full_name.strip_prefix(&expected)?.to_string();
-            (target.starts_with(prefix) && seen.insert(target.clone()))
-                .then_some((target, candidate.detail))
+            (target.starts_with(prefix) && seen.insert(target.clone())).then_some((
+                candidate.priority,
+                target,
+                candidate.detail,
+            ))
         })
         .collect::<Vec<_>>();
-    targets.sort_by(|left, right| left.0.cmp(&right.0));
+    targets.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
     let is_incomplete = targets.len() > MAX_ITEMS;
     targets.truncate(MAX_ITEMS);
     let items = targets
         .into_iter()
         .enumerate()
-        .map(|(index, (target, detail))| CompletionItem {
+        .map(|(index, (_, target, detail))| CompletionItem {
             label: target.clone(),
             kind: Some(CompletionItemKind::EVENT),
             detail: Some(detail),
@@ -503,6 +509,7 @@ fn load_tracepoint_targets(root: &Path) -> Vec<TargetCandidate> {
             targets.push(TargetCandidate {
                 full_name: format!("tracepoint:{subsystem_name}:{event_name}"),
                 detail: "kernel tracepoint".to_string(),
+                priority: 1,
             });
         }
     }
@@ -522,6 +529,7 @@ fn load_kprobe_targets() -> Vec<TargetCandidate> {
             .map(|function| TargetCandidate {
                 full_name: format!("kprobe:{function}"),
                 detail: "kernel function".to_string(),
+                priority: 1,
             })
             .collect()
     })
@@ -685,9 +693,28 @@ mod tests {
                 .map(|(full_name, detail)| TargetCandidate {
                     full_name: (*full_name).to_string(),
                     detail: (*detail).to_string(),
+                    priority: 0,
                 })
                 .collect(),
         );
         assert_eq!(completions.items[0].label, "cpu-cycles");
+    }
+
+    #[test]
+    fn workspace_targets_survive_large_kernel_result_sets() {
+        let mut candidates = vec![TargetCandidate {
+            full_name: "tracepoint:syscalls:sys_enter_openat".to_string(),
+            detail: "workspace probe".to_string(),
+            priority: 0,
+        }];
+        candidates.extend((0..MAX_ITEMS + 10).map(|index| TargetCandidate {
+            full_name: format!("tracepoint:syscalls:sys_enter_{index:03}"),
+            detail: "kernel tracepoint".to_string(),
+            priority: 1,
+        }));
+
+        let completions = target_completions("tracepoint", "sysc", Range::default(), candidates);
+        assert_eq!(completions.items[0].label, "syscalls:sys_enter_openat");
+        assert!(completions.is_incomplete);
     }
 }

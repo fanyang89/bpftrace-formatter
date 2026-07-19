@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- Keep workspace probe targets ahead of large kernel metadata result sets.
+- Make completion smoke tests deterministic on hosts with readable tracefs metadata.
+
 ## 0.3.1
 
 - Add rootless probe target and `args` field completion.

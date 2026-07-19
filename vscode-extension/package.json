@@ -2,7 +2,7 @@
   "name": "btfmt",
   "displayName": "btfmt - bpftrace Language Support",
   "description": "Format, complete, and navigate bpftrace scripts with a bundled language server.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "fanyang89",
   "license": "Unlicense",
   "icon": "images/icon.png",
