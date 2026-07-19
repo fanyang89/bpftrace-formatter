@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="vscode-extension/images/icon.png" width="112" height="112" alt="btfmt 标志">
+  <img src="./btfmt-logo.png" width="112" height="112" alt="btfmt 标志">
 </p>
 
 <h1 align="center">btfmt</h1>
