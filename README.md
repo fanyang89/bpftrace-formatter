@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./btfmt-logo.png" width="112" height="112" alt="btfmt logo">
+  <img src="assets/logo/btfmt-logo-256.png" width="112" height="112" alt="btfmt logo">
 </p>
 
 <h1 align="center">btfmt</h1>
