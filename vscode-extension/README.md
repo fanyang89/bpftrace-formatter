@@ -2,9 +2,13 @@
   <img src="images/icon.png" width="96" height="96" alt="btfmt logo">
 </p>
 
-# btfmt - bpftrace Language Support
+<h1 align="center">btfmt - bpftrace Language Support</h1>
 
-Format, complete, and navigate bpftrace scripts with a bundled native language server.
+<p align="center">Format, complete, and navigate bpftrace scripts with a bundled native language server.</p>
+
+<p align="center">
+  <img src="images/completion.png" width="860" alt="Probe completion in VS Code">
+</p>
 
 ## Language Features
 
@@ -29,6 +33,8 @@ Open a `.bt` file and run **Format Document**. To enable format on save:
 ```
 
 The extension uses its bundled `btfmt` server by default. No separate formatter installation is required.
+
+Platform-specific VSIX files are available from [GitHub Releases](https://github.com/fanyang89/bpftrace-formatter/releases/latest).
 
 ## Completion Without Root
 
@@ -65,4 +71,4 @@ btfmt does not collect telemetry. Source code and workspace paths remain local t
 
 ## Support
 
-See [SUPPORT.md](SUPPORT.md) for troubleshooting and issue reporting. Release history is available in [CHANGELOG.md](CHANGELOG.md).
+See [SUPPORT.md](SUPPORT.md) for troubleshooting and issue reporting. Release history is available in [CHANGELOG.md](CHANGELOG.md), and full CLI/LSP documentation lives in the [project repository](https://github.com/fanyang89/bpftrace-formatter).

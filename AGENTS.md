@@ -59,6 +59,7 @@ It summarizes the commands and style conventions observed in the codebase.
 - `tests/testdata/`: input fixtures
 - `tests/testdata/golden/`: expected Rust formatter output
 - `tests/corpus/bpftrace-tools/`: upstream bpftrace scripts for acceptance tests
+- `docs/configuration.md`: user-facing configuration reference
 - `vscode-extension/`: VS Code extension client
 
 ## Parser Policy
@@ -72,7 +73,7 @@ It summarizes the commands and style conventions observed in the codebase.
 - Default config values live in `src/config.rs`.
 - Example config is `.btfmt.json` at repository root.
 - Config search order:
-  1. `-config` flag or explicit LSP config path
+  1. `--config` flag or explicit LSP config path
   2. `.btfmt.json` in the document/current directory or parents
   3. `~/.btfmt.json` for CLI
   4. built-in defaults

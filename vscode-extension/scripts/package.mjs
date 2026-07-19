@@ -43,7 +43,13 @@ try {
   const files = execFileSync(process.execPath, [vsce, 'ls', '--no-dependencies'], {
     encoding: 'utf8',
   });
-  for (const required of [`bin/${bundledName}`, 'images/icon.png', 'CHANGELOG.md', 'SUPPORT.md']) {
+  for (const required of [
+    `bin/${bundledName}`,
+    'images/icon.png',
+    'images/completion.png',
+    'CHANGELOG.md',
+    'SUPPORT.md',
+  ]) {
     if (!files.includes(required)) {
       throw new Error(`package is missing required file: ${required}`);
     }
