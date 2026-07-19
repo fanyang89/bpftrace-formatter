@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.3
 
 - Add an embedded tracepoint catalog for completion without kernel metadata access.
 
