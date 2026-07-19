@@ -514,13 +514,19 @@ def main():
                 if isinstance(target_completion, dict)
                 else target_completion
             ) or []
-            if "syscalls:sys_enter_openat" not in {
-                item.get("label") for item in target_items
-            }:
+            target_labels = {item.get("label") for item in target_items}
+            if "syscalls:sys_enter_openat" not in target_labels:
                 fail(
                     summary,
                     "context_completion",
                     "probe target completion is missing",
+                    resp=resp,
+                )
+            if "syscalls:sys_enter_access" not in target_labels:
+                fail(
+                    summary,
+                    "context_completion",
+                    "portable probe target completion is missing",
                     resp=resp,
                 )
 

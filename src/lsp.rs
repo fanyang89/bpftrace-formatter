@@ -3,6 +3,7 @@ mod completion;
 mod probes;
 mod snapshot;
 mod symbols;
+mod tracepoint_catalog;
 mod workspace;
 
 use self::snapshot::DocumentSnapshot;

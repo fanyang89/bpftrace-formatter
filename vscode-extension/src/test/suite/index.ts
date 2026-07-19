@@ -49,6 +49,10 @@ export async function run(): Promise<void> {
     targets.items.some((item) => item.label === 'syscalls:sys_enter_openat'),
     'completion provider did not return the probe target'
   );
+  assert.ok(
+    targets.items.some((item) => item.label === 'syscalls:sys_enter_access'),
+    'completion provider did not return the portable probe target'
+  );
   const fields = await completionItems(
     dynamicDocument.uri,
     dynamicDocument.positionAt(dynamicSource.indexOf('args.') + 'args.'.length)

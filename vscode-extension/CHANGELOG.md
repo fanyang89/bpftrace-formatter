@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add an embedded tracepoint catalog for completion without kernel metadata access.
+
 ## 0.3.2
 
 - Keep workspace probe targets ahead of large kernel metadata result sets.

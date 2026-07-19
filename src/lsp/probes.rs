@@ -1,4 +1,5 @@
 use super::snapshot::DocumentSnapshot;
+use super::tracepoint_catalog;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -157,6 +158,17 @@ impl ProbeCatalog {
                 let mut candidates = workspace.targets;
                 if allow_kernel_metadata {
                     candidates.extend(self.kernel_targets().await);
+                }
+                if provider == "tracepoint" {
+                    candidates.extend(
+                        tracepoint_catalog::targets()
+                            .filter(|target| target.starts_with(&target_prefix))
+                            .map(|target| TargetCandidate {
+                                full_name: format!("tracepoint:{target}"),
+                                detail: "portable tracepoint catalog".to_string(),
+                                priority: 2,
+                            }),
+                    );
                 }
                 candidates.extend(STATIC_TARGETS.iter().map(|(full_name, detail)| {
                     TargetCandidate {
@@ -716,5 +728,57 @@ mod tests {
         let completions = target_completions("tracepoint", "sysc", Range::default(), candidates);
         assert_eq!(completions.items[0].label, "syscalls:sys_enter_openat");
         assert!(completions.is_incomplete);
+    }
+
+    #[tokio::test]
+    async fn portable_tracepoints_complete_without_kernel_metadata() {
+        let completions = ProbeCatalog::default()
+            .complete(
+                CompletionRequest::ProbeTargets {
+                    provider: "tracepoint".to_string(),
+                    target_prefix: "syscalls:sys_enter_open".to_string(),
+                    range: Range::default(),
+                },
+                WorkspaceMetadata::default(),
+                false,
+            )
+            .await;
+
+        assert!(completions
+            .items
+            .iter()
+            .any(|item| item.label == "syscalls:sys_enter_openat"));
+        assert!(completions
+            .items
+            .iter()
+            .any(|item| { item.detail.as_deref() == Some("portable tracepoint catalog") }));
+    }
+
+    #[tokio::test]
+    async fn workspace_tracepoints_override_portable_catalog_details() {
+        let mut workspace = WorkspaceMetadata::default();
+        workspace.targets.push(TargetCandidate {
+            full_name: "tracepoint:sched:sched_switch".to_string(),
+            detail: "workspace probe".to_string(),
+            priority: 0,
+        });
+
+        let completions = ProbeCatalog::default()
+            .complete(
+                CompletionRequest::ProbeTargets {
+                    provider: "tracepoint".to_string(),
+                    target_prefix: "sched:sched_switch".to_string(),
+                    range: Range::default(),
+                },
+                workspace,
+                false,
+            )
+            .await;
+
+        assert_eq!(completions.items.len(), 1);
+        assert_eq!(
+            completions.items[0].detail.as_deref(),
+            Some("workspace probe")
+        );
     }
 }

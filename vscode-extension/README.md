@@ -42,9 +42,9 @@ Probe target and `args` field completion never invokes `sudo` or runs bpftrace. 
 
 - Probe and field usage in the current workspace
 - Kernel tracepoint metadata when it is readable by the current user
-- Portable catalogs for hardware, software, profile, and interval probes
+- An embedded portable catalog for tracepoint, hardware, software, profile, and interval probes
 
-Unavailable kernel metadata is treated as a normal limited-data environment, not an error.
+Catalog entries are cross-kernel suggestions. Readable kernel metadata takes precedence when available; unavailable metadata is treated as a normal limited-data environment, not an error.
 
 ## Commands
 

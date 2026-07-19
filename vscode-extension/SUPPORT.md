@@ -12,7 +12,7 @@ Reset `btfmt.serverPath` to use the bundled binary, then run **btfmt: Restart Se
 
 ### Probe Completion Is Limited
 
-btfmt does not require root. It uses workspace scripts and kernel metadata readable by the current user, so available targets can vary by host and container configuration.
+btfmt does not require root. Portable catalog suggestions remain available without kernel access. Host-specific targets depend on kernel metadata readable by the current user.
 
 ### Remote Workspace Uses The Wrong Platform
 
