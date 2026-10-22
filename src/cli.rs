@@ -4,6 +4,9 @@ use crate::format::format_source;
 use crate::lsp;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use ignore::WalkBuilder;
+use similar::TextDiff;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -33,6 +36,10 @@ struct Cli {
     )]
     check: bool,
 
+    /// Print unified formatting diffs without modifying files.
+    #[arg(long, conflicts_with_all = ["write", "in_place", "generate_config"])]
+    diff: bool,
+
     #[arg(long = "generate-config")]
     generate_config: bool,
 
@@ -42,7 +49,8 @@ struct Cli {
     #[arg(long = "config-output", default_value = ".btfmt.json")]
     config_output: PathBuf,
 
-    #[arg(value_name = "FILE", allow_hyphen_values = true)]
+    /// Files, directories (recursive *.bt discovery), or - for stdin.
+    #[arg(value_name = "PATH", allow_hyphen_values = true)]
     files: Vec<PathBuf>,
 }
 
@@ -105,8 +113,9 @@ pub async fn run() -> Result<()> {
         anyhow::bail!("cannot write stdin in place");
     }
 
-    let mut inputs = Vec::with_capacity(cli.files.len());
-    for path in &cli.files {
+    let paths = expand_inputs(&cli.files)?;
+    let mut inputs = Vec::with_capacity(paths.len());
+    for path in &paths {
         let label = input_label(path);
         if cli.verbose {
             eprintln!("Processing: {label}");
@@ -126,6 +135,15 @@ pub async fn run() -> Result<()> {
     for input in &inputs {
         let changed = input.changed();
 
+        if cli.diff && changed {
+            let label = diff_label(&input.label);
+            TextDiff::from_lines(&input.source, &input.formatted)
+                .unified_diff()
+                .header(&label, &label)
+                .to_writer(io::stdout().lock())
+                .context("writing formatting diff")?;
+        }
+
         if cli.check {
             if changed {
                 check_failures.push(input.label.clone());
@@ -142,7 +160,7 @@ pub async fn run() -> Result<()> {
             if changed {
                 file_io::write_atomic(&input.path, input.formatted.as_bytes())?;
             }
-        } else {
+        } else if !cli.diff {
             let mut stdout = io::stdout().lock();
             stdout.write_all(input.formatted.as_bytes())?;
         }
@@ -157,6 +175,61 @@ pub async fn run() -> Result<()> {
         anyhow::bail!("format check failed for: {}", check_failures.join(", "));
     }
     Ok(())
+}
+
+fn expand_inputs(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut result = Vec::new();
+    let mut seen = HashSet::new();
+    for path in paths {
+        if is_stdin(path) {
+            result.push(path.clone());
+            continue;
+        }
+        let mut candidates = Vec::new();
+        if path.is_dir() {
+            for entry in WalkBuilder::new(path)
+                .require_git(false)
+                .follow_links(false)
+                .build()
+            {
+                let entry = entry.with_context(|| format!("walking {}", path.display()))?;
+                if let Some(error) = entry.error() {
+                    anyhow::bail!(
+                        "reading ignore rules for {}: {error}",
+                        entry.path().display()
+                    );
+                }
+                if entry.file_type().is_some_and(|kind| kind.is_file())
+                    && entry.path().extension().is_some_and(|ext| ext == "bt")
+                {
+                    candidates.push(entry.into_path());
+                }
+            }
+            candidates.sort();
+        } else {
+            // Explicit files bypass discovery filters, including extension and ignore rules.
+            candidates.push(path.clone());
+        }
+        for candidate in candidates {
+            let canonical = fs::canonicalize(&candidate)
+                .with_context(|| format!("reading {}", candidate.display()))?;
+            if seen.insert(canonical) {
+                result.push(candidate);
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn diff_label(label: &str) -> String {
+    if label
+        .chars()
+        .any(|ch| ch.is_control() || matches!(ch, '\\' | '"'))
+    {
+        format!("{label:?}")
+    } else {
+        label.to_string()
+    }
 }
 
 fn normalized_args() -> Vec<OsString> {
