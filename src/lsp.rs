@@ -1,6 +1,7 @@
 mod catalog;
 mod completion;
 mod probes;
+mod signature_help;
 mod snapshot;
 mod symbols;
 mod tracepoint_catalog;
@@ -147,6 +148,11 @@ impl LanguageServer for Backend {
                         ".".to_string(),
                     ]),
                     ..CompletionOptions::default()
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".into(), ",".into()]),
+                    retrigger_characters: Some(vec![")".into()]),
+                    ..SignatureHelpOptions::default()
                 }),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -332,6 +338,13 @@ impl LanguageServer for Backend {
             }),
             range: Some(range),
         }))
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let position = params.text_document_position_params;
+        Ok(self
+            .doc(&position.text_document.uri)
+            .and_then(|doc| signature_help::signature_help(&doc, position.position)))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {

@@ -109,10 +109,20 @@ tracepoint:syscalls:sys_enter_openat
 | Navigation | Definitions, references, highlights, and document symbols |
 | Rename | Lexical variables plus workspace-wide maps and macro families |
 | Hover | Versioned bpftrace builtin documentation |
+| Signature help | Parameter documentation and active-parameter hints for supported builtin calls, including incomplete calls |
 | Diagnostics | Syntax errors with UTF-16-correct editor ranges |
 | Formatting | Shared CLI/LSP engine and per-workspace `.btfmt.json` |
 
 Probe completion never invokes `sudo` or runs bpftrace. It combines symbols observed in the workspace, portable event catalogs, and kernel metadata readable by the current user. Missing kernel access is a normal limited-data environment, not an error.
+
+Signature help triggers on `(` and `,`, and updates after `)`. It handles nested calls,
+strings, comments, map keys, and UTF-16 cursor positions without executing bpftrace.
+The initial static catalog follows the [bpftrace 0.24 standard library](https://bpftrace.org/docs/release_024/stdlib)
+and covers `avg`, `cat`, `clear`, `count`, `delete`, `exit`, `hist`, `join`, `kaddr`,
+`ksym`, `lhist`, `max`, `min`, `print`, `printf`, `reg`, `stats`, `str`, `sum`,
+`system`, `time`, `uaddr`, `usym`, and `zero`. Brackets mark optional parameters;
+variadic arguments share the final parameter hint. Macro signatures and type-based
+overload resolution are not yet supported.
 
 ## Configuration
 
