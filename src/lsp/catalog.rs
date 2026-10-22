@@ -557,9 +557,99 @@ const ENTRIES: &[CatalogEntry] = &[
     ),
 ];
 
+#[derive(Debug)]
+pub(super) struct Signature {
+    pub parameters: &'static [(&'static str, &'static str)],
+    pub variadic: bool,
+}
+
+// Signatures follow https://bpftrace.org/docs/release_024/stdlib.
+// Optional parameters are bracketed; unlisted functions intentionally have no help.
+pub(super) fn signature(name: &str) -> Option<Signature> {
+    let parameters: &'static [(&'static str, &'static str)] = match name {
+        "avg" | "max" | "min" | "stats" | "sum" => &[("int64 n", "Value to aggregate.")],
+        "count" => &[],
+        "cat" | "printf" | "system" => &[
+            ("string fmt", "Constant format string."),
+            ("...args", "Values substituted into the format string."),
+        ],
+        "clear" | "zero" => &[("map m", "Map to modify.")],
+        "delete" => &[
+            (
+                "map m",
+                "Map to modify; legacy indexed-map syntax is also supported.",
+            ),
+            ("[mapkey key]", "Key to delete; omit for scalar maps."),
+        ],
+        "exit" => &[("[int code]", "Optional process exit code.")],
+        "hist" => &[
+            ("int64 n", "Value to record in the histogram."),
+            (
+                "[int k]",
+                "Log2 buckets per power of two, from 0 to 5; defaults to 0.",
+            ),
+        ],
+        "lhist" => &[
+            ("int64 n", "Value to record in the histogram."),
+            ("int64 min", "Lower bound of the histogram."),
+            ("int64 max", "Upper bound of the histogram."),
+            ("int64 step", "Bucket width."),
+        ],
+        "join" => &[
+            ("char *arr[]", "Array of strings to print."),
+            ("[string sep]", "Separator; defaults to a space."),
+        ],
+        "kaddr" | "uaddr" => &[("string name", "Constant symbol name to resolve.")],
+        "ksym" | "usym" => &[("uint64 addr", "Address to symbolize.")],
+        "print" => &[
+            ("value", "Value or map to print."),
+            (
+                "[int64 top]",
+                "For maps only: print the highest top entries.",
+            ),
+            (
+                "[int64 div]",
+                "For maps only: divide values by this factor when printing.",
+            ),
+        ],
+        "reg" => &[("string name", "Architecture-specific register name.")],
+        "str" => &[
+            ("char *data", "Pointer to a NUL-terminated string."),
+            (
+                "[uint32 length]",
+                "Maximum length including the terminating NUL.",
+            ),
+        ],
+        "time" => &[("string fmt", "strftime-style wall-clock format string.")],
+        _ => return None,
+    };
+    Some(Signature {
+        parameters,
+        variadic: matches!(name, "cat" | "printf" | "system"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signatures_reference_documented_builtin_functions() {
+        let mut count = 0;
+        for entry in entries() {
+            if let Some(signature) = signature(entry.label) {
+                count += 1;
+                assert_eq!(entry.kind, CatalogKind::Function);
+                assert!(!entry.documentation.is_empty());
+                assert!(!signature.variadic || !signature.parameters.is_empty());
+                for (label, documentation) in signature.parameters {
+                    assert!(!label.is_empty());
+                    assert!(!documentation.is_empty());
+                }
+            }
+        }
+        assert_eq!(count, 24);
+    }
 
     #[test]
     fn catalog_labels_are_unique_and_versioned() {

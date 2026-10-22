@@ -270,7 +270,8 @@ def main():
                 "processId": None,
                 "rootUri": td_path.absolute().as_uri(),
                 "capabilities": {
-                    "workspace": {"workspaceEdit": {"documentChanges": True}}
+                    "workspace": {"workspaceEdit": {"documentChanges": True}},
+                    "textDocument": {"signatureHelp": {"contextSupport": True}},
                 },
                 "clientInfo": {"name": "task-lsp-smoke", "version": "0"},
                 "initializationOptions": {"btfmt": {"configPath": ".btfmt.json"}},
@@ -289,6 +290,7 @@ def main():
                 "referencesProvider",
                 "documentHighlightProvider",
                 "renameProvider",
+                "signatureHelpProvider",
             ):
                 if not capabilities.get(supported):
                     fail(
@@ -307,6 +309,9 @@ def main():
                     "dynamic completion triggers are missing",
                     resp=resp,
                 )
+            signature_provider = capabilities.get("signatureHelpProvider") or {}
+            if not {"(", ","}.issubset(signature_provider.get("triggerCharacters") or []) or ")" not in (signature_provider.get("retriggerCharacters") or []):
+                fail(summary, "initialize", "signature help triggers are missing", resp=resp)
             record(summary, "initialize", t0)
 
             lsp.notify("initialized", {})
@@ -406,6 +411,63 @@ def main():
             if "error" in resp:
                 fail(summary, "hover", "hover returned error", resp=resp)
             record(summary, "hover", t0, has_result=resp.get("result") is not None)
+
+            signature_uri = (td_path / "signature-help.bt").absolute().as_uri()
+            signature_cases = [
+                ('BEGIN { printf(|', "printf", 0),
+                ('BEGIN { printf("😀, %s", str(arg0, |)); }', "str", 1),
+                ('BEGIN { printf("😀, %s", str(arg0)|); }', "printf", 1),
+                ('BEGIN { printf("😀, %s", str(arg0), |); }', "printf", 1),
+                ('BEGIN { @h = hist(42, |); }', "hist", 1),
+                ('BEGIN { printf("x")|; }', None, None),
+                ('BEGIN { printf("x", unknown(|)); }', None, None),
+                ('BEGIN { printf("x", /* comment |', None, None),
+            ]
+            previous_help = None
+            for version, (marked, expected_name, expected_parameter) in enumerate(signature_cases, 1):
+                cursor = marked.index("|")
+                text = marked.replace("|", "", 1)
+                if version == 1:
+                    lsp.notify("textDocument/didOpen", {"textDocument": {
+                        "uri": signature_uri, "languageId": "bpftrace",
+                        "version": version, "text": text,
+                    }})
+                else:
+                    lsp.notify("textDocument/didChange", {
+                        "textDocument": {"uri": signature_uri, "version": version},
+                        "contentChanges": [{"text": text}],
+                    })
+                lsp.wait_for(lambda msg: msg.get("method") == "textDocument/publishDiagnostics"
+                             and msg.get("params", {}).get("uri") == signature_uri
+                             and msg.get("params", {}).get("version") == version)
+                context = {"triggerKind": 1, "isRetrigger": False}
+                if previous_help:
+                    context = {"triggerKind": 2, "triggerCharacter": ")" if version == 3 else ",",
+                               "isRetrigger": True, "activeSignatureHelp": previous_help}
+                rid = lsp.request("textDocument/signatureHelp", {
+                    "textDocument": {"uri": signature_uri},
+                    "position": offset_to_position(text, cursor), "context": context,
+                })
+                resp, _ = lsp.wait_for_response(rid)
+                result = resp.get("result")
+                if "error" in resp:
+                    fail(summary, "signature_help", "request failed", resp=resp)
+                if expected_name is None:
+                    if result is not None:
+                        fail(summary, "signature_help", "unexpected signature", resp=resp)
+                elif not result or not result["signatures"][0]["label"].startswith(expected_name + "(") or result.get("activeParameter") != expected_parameter:
+                    fail(summary, "signature_help", "wrong signature or parameter", resp=resp)
+                elif not result["signatures"][0]["parameters"][expected_parameter].get("documentation"):
+                    fail(summary, "signature_help", "parameter documentation missing", resp=resp)
+                previous_help = result
+            lsp.notify("textDocument/didClose", {"textDocument": {"uri": signature_uri}})
+            rid = lsp.request("textDocument/signatureHelp", {
+                "textDocument": {"uri": signature_uri}, "position": {"line": 0, "character": 0},
+            })
+            resp, _ = lsp.wait_for_response(rid)
+            if "error" in resp or resp.get("result") is not None:
+                fail(summary, "signature_help", "closed document should return null", resp=resp)
+            record(summary, "signature_help", t0, cases=len(signature_cases))
 
             rid = lsp.request(
                 "textDocument/documentSymbol",
