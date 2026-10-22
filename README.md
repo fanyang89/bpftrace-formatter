@@ -68,7 +68,9 @@ cargo install --locked --git https://github.com/fanyang89/bpftrace-formatter.git
 ```bash
 btfmt script.bt                 # formatted output on stdout
 btfmt --write script.bt         # write back atomically
-btfmt --check scripts/*.bt      # non-zero when formatting differs
+btfmt --check scripts/          # recursively check *.bt files
+btfmt --check --diff scripts/   # CI check with unified diffs
+btfmt --diff script.bt          # preview changes without writing
 cat script.bt | btfmt -         # explicit stdin
 ```
 
@@ -100,6 +102,34 @@ tracepoint:syscalls:sys_enter_openat
 ```
 
 </details>
+
+## CLI Inputs and Diffs
+
+File paths, directories, and `-` (stdin) can be mixed in one invocation. Directory
+inputs recursively discover regular files with the case-sensitive `.bt` extension.
+Discovery respects `.gitignore` (even outside a Git repository), `.ignore`, parent
+ignore files, Git excludes, and global Git ignore rules. Hidden entries are skipped
+unless whitelisted by ignore rules; symlinks encountered during traversal are not
+followed. Explicit file arguments bypass extension, hidden-file, and ignore filters,
+and explicit file symlinks retain their existing behavior.
+
+Arguments are processed in command-line order, with each directory's files sorted
+by path. Canonical file paths are deduplicated, keeping the first occurrence and its
+path label. Empty directories are successful no-ops. Without `--write`, `--check`,
+or `--diff`, formatted inputs are concatenated on stdout. Stdin may appear only once
+and cannot be combined with in-place writing.
+
+`--diff` prints unified diffs for changed inputs only, with three lines of context
+and missing-final-newline markers. It never writes files and succeeds even when
+changes are found; combine it with `--check` to return nonzero for formatting
+changes. Check summaries and errors go to stderr. `--diff` conflicts with `--write`,
+`--in-place`, and `--generate-config`.
+
+All inputs are discovered, read, and formatted before any formatted output, diff,
+or file write. Discovery/read/parse failures therefore produce no partial output
+or writes; filesystem failures during the subsequent write phase are not rolled
+back. CLI configuration still comes from the invocation directory or `--config`,
+not each discovered file's directory (see [Configuration](docs/configuration.md)).
 
 ## Language Features
 

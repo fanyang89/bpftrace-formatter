@@ -374,3 +374,356 @@ fn cli_help_version_and_lsp_help_are_available() {
         .success()
         .stdout(predicate::str::contains("Usage"));
 }
+
+#[test]
+fn cli_discovers_directories_in_sorted_order_and_respects_ignore_rules() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    fs::create_dir(dir.path().join(".hidden")).unwrap();
+    fs::write(dir.path().join(".gitignore"), "ignored.bt\n").unwrap();
+    fs::write(dir.path().join(".ignore"), "*.skip.bt\n").unwrap();
+    fs::write(dir.path().join("nested/.gitignore"), "*.bt\n!keep.bt\n").unwrap();
+    for name in [
+        "ignored.bt",
+        "bad.skip.bt",
+        ".hidden.bt",
+        ".hidden/bad.bt",
+        "nested/bad.bt",
+        "other.txt",
+        "uppercase.BT",
+    ] {
+        fs::write(dir.path().join(name), "invalid bpftrace").unwrap();
+    }
+    fs::write(dir.path().join("z.bt"), "END{exit();}").unwrap();
+    fs::write(dir.path().join("a.bt"), "BEGIN{exit();}").unwrap();
+    fs::write(dir.path().join("nested/keep.bt"), "interval:s:1{exit();}").unwrap();
+
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg(".")
+        .assert()
+        .success()
+        .stdout(
+            "BEGIN\n{\n    exit();\n}\ninterval:s:1\n{\n    exit();\n}\nEND\n{\n    exit();\n}\n",
+        );
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--check", "."])
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("format check failed"));
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--write", "."])
+        .assert()
+        .success()
+        .stdout("");
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--check", "."])
+        .assert()
+        .success()
+        .stdout("");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("ignored.bt")).unwrap(),
+        "invalid bpftrace"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("nested/bad.bt")).unwrap(),
+        "invalid bpftrace"
+    );
+}
+
+#[test]
+fn cli_preserves_argument_order_and_deduplicates_overlapping_inputs() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    fs::write(dir.path().join("a.bt"), "BEGIN{exit();}").unwrap();
+    fs::write(dir.path().join("nested/z.bt"), "END{exit();}").unwrap();
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["nested/z.bt", ".", "./a.bt", "nested", "-"])
+        .write_stdin("interval:s:1{exit();}")
+        .assert()
+        .success()
+        .stdout(
+            "END\n{\n    exit();\n}\nBEGIN\n{\n    exit();\n}\ninterval:s:1\n{\n    exit();\n}\n",
+        );
+}
+
+#[test]
+fn cli_explicit_files_bypass_discovery_filters() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join(".gitignore"), "*.bt\n").unwrap();
+    for name in ["ignored.bt", "script.txt", ".hidden.bt"] {
+        fs::write(dir.path().join(name), "BEGIN{exit();}").unwrap();
+        Command::cargo_bin("btfmt")
+            .unwrap()
+            .current_dir(dir.path())
+            .arg(name)
+            .assert()
+            .success()
+            .stdout("BEGIN\n{\n    exit();\n}\n");
+    }
+}
+
+#[test]
+fn cli_empty_directories_are_successful_no_ops() {
+    let dir = tempdir().unwrap();
+    for args in [
+        vec!["."],
+        vec!["--check", "."],
+        vec!["--diff", "."],
+        vec!["--write", "."],
+    ] {
+        Command::cargo_bin("btfmt")
+            .unwrap()
+            .current_dir(dir.path())
+            .args(args)
+            .assert()
+            .success()
+            .stdout("");
+    }
+}
+
+#[test]
+fn cli_directory_failures_do_not_write_or_emit_partial_diffs() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.bt"), "BEGIN{exit();}").unwrap();
+    fs::write(dir.path().join("z.bt"), "END{exit();").unwrap();
+    for mode in ["--write", "--diff", "--check"] {
+        Command::cargo_bin("btfmt")
+            .unwrap()
+            .current_dir(dir.path())
+            .args([mode, "."])
+            .assert()
+            .failure()
+            .stdout("");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("a.bt")).unwrap(),
+            "BEGIN{exit();}"
+        );
+    }
+    fs::remove_file(dir.path().join("z.bt")).unwrap();
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--diff", ".", "missing.bt"])
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("reading missing.bt"));
+}
+
+#[test]
+fn cli_diff_emits_unified_diff_and_preserves_input() {
+    let dir = tempdir().unwrap();
+    let source = "BEGIN{exit();}";
+    fs::write(dir.path().join("script.bt"), source).unwrap();
+    let expected = "--- script.bt\n+++ script.bt\n@@ -1 +1,4 @@\n-BEGIN{exit();}\n\\ No newline at end of file\n+BEGIN\n+{\n+    exit();\n+}\n";
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--diff", "script.bt"])
+        .assert()
+        .success()
+        .stdout(expected);
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--check", "--diff", "."])
+        .assert()
+        .failure()
+        .stdout(
+            predicate::str::contains("-BEGIN{exit();}\n")
+                .and(predicate::str::contains("+    exit();\n")),
+        )
+        .stderr(predicate::str::contains("format check failed"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("script.bt")).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn cli_diff_omits_unchanged_files_and_supports_stdin() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("unchanged.bt"),
+        "BEGIN\n{\n    exit();\n}\n",
+    )
+    .unwrap();
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--check", "--diff", "."])
+        .assert()
+        .success()
+        .stdout("");
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--diff", ".", "-"])
+        .write_stdin("BEGIN{printf(\"😀\");}")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("--- <stdin>\n+++ <stdin>\n")
+                .and(predicate::str::contains("+    printf(\"😀\");"))
+                .and(predicate::str::contains("unchanged.bt").not()),
+        );
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["--check", "--diff", "-"])
+        .write_stdin("BEGIN{exit();}")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("--- <stdin>"));
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["--diff", "-", "-"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("stdin may only be specified once"));
+}
+
+#[test]
+fn cli_diff_rejects_mutating_options() {
+    for flag in ["--write", "--in-place", "--generate-config"] {
+        Command::cargo_bin("btfmt")
+            .unwrap()
+            .args(["--diff", flag, "input.bt"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("cannot be used with"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_directory_discovery_skips_symlinks_but_explicit_links_work() {
+    use std::os::unix::fs::symlink;
+    let dir = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("bad.bt"), "invalid").unwrap();
+    fs::write(dir.path().join("script.bt"), "BEGIN{exit();}").unwrap();
+    symlink(outside.path(), dir.path().join("external")).unwrap();
+    symlink(
+        outside.path().join("bad.bt"),
+        dir.path().join("external.bt"),
+    )
+    .unwrap();
+    symlink("script.bt", dir.path().join("alias.bt")).unwrap();
+    symlink("missing", dir.path().join("broken.bt")).unwrap();
+    symlink(".", dir.path().join("loop")).unwrap();
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["alias.bt", "."])
+        .assert()
+        .success()
+        .stdout("BEGIN\n{\n    exit();\n}\n");
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--write", "alias.bt", "."])
+        .assert()
+        .success();
+    assert!(fs::symlink_metadata(dir.path().join("alias.bt"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("script.bt")).unwrap(),
+        "BEGIN\n{\n    exit();\n}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(outside.path().join("bad.bt")).unwrap(),
+        "invalid"
+    );
+}
+
+#[test]
+fn cli_directory_discovery_respects_parent_rules_and_git_excludes() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".git/info")).unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    fs::write(dir.path().join(".gitignore"), "parent-ignored.bt\n").unwrap();
+    fs::write(dir.path().join(".git/info/exclude"), "excluded.bt\n").unwrap();
+    for name in ["parent-ignored.bt", "excluded.bt"] {
+        fs::write(dir.path().join("nested").join(name), "invalid").unwrap();
+    }
+    fs::write(dir.path().join("nested/ok.bt"), "BEGIN{exit();}").unwrap();
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("nested")
+        .assert()
+        .success()
+        .stdout("BEGIN\n{\n    exit();\n}\n");
+}
+
+#[test]
+fn cli_invalid_ignore_rules_fail_before_writing() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join(".ignore"), "[z-a]\n").unwrap();
+    fs::write(dir.path().join("script.bt"), "BEGIN{exit();}").unwrap();
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--write", "."])
+        .assert()
+        .failure()
+        .stdout("");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("script.bt")).unwrap(),
+        "BEGIN{exit();}"
+    );
+}
+
+#[test]
+fn cli_diff_separates_distant_changes_into_context_hunks() {
+    let source = format!(
+        "BEGIN\n{{\n    @a=1;\n{}    @z=1;\n}}\n",
+        "    @m = 1;\n".repeat(20)
+    );
+    let output = Command::cargo_bin("btfmt")
+        .unwrap()
+        .args(["--diff", "-"])
+        .write_stdin(source)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let diff = String::from_utf8(output).unwrap();
+    assert_eq!(
+        diff.lines().filter(|line| line.starts_with("@@ ")).count(),
+        2
+    );
+    assert!(diff.contains("-    @a=1;\n+    @a = 1;"));
+    assert!(diff.contains("-    @z=1;\n+    @z = 1;"));
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_diff_quotes_control_characters_in_file_labels() {
+    let dir = tempdir().unwrap();
+    let name = "line\nbreak.bt";
+    fs::write(dir.path().join(name), "BEGIN{exit();}").unwrap();
+    Command::cargo_bin("btfmt")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["--diff", name])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with(
+            "--- \"line\\nbreak.bt\"\n+++ \"line\\nbreak.bt\"\n",
+        ));
+}
