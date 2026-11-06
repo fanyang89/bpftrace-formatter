@@ -6,11 +6,6 @@ export async function testEditingLifecycle(): Promise<void> {
   assert.ok(root);
   const uri = vscode.Uri.joinPath(root, 'editing lifecycle 中文.bt');
   await vscode.workspace.fs.writeFile(uri, Buffer.from('BEGIN{}\n'));
-  const config = vscode.workspace.getConfiguration('', uri);
-  await config.update('[bpftrace]', {
-    'editor.defaultFormatter': 'fanyang89.btfmt',
-    'editor.formatOnSave': true,
-  }, vscode.ConfigurationTarget.Workspace);
   let document = await vscode.workspace.openTextDocument(uri);
   assert.strictEqual(document.languageId, 'bpftrace');
   assert.strictEqual(vscode.workspace.getConfiguration('editor', document).get('formatOnSave'), true);

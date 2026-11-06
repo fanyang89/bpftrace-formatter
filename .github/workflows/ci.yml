@@ -98,7 +98,12 @@ jobs:
         run: cargo build --manifest-path ../Cargo.toml --bin btfmt
 
       - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install --yes xvfb
+        timeout-minutes: 5
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install --yes xvfb
+          fi
 
       - name: Run Extension Host test
         env:

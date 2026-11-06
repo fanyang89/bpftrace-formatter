@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runTests, runVSCodeCommand } from '@vscode/test-electron';
+import { prepareWorkspace } from './workspace';
 
 async function main(): Promise<void> {
   const argument = process.argv[2];
@@ -26,8 +27,7 @@ async function main(): Promise<void> {
     fs.writeFileSync(path.join(poisonPath, process.platform === 'win32' ? 'btfmt.exe' : 'btfmt'),
       '#!/bin/sh\nexit 99\n', { mode: 0o755 });
     const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-    fs.writeFileSync(path.join(workspace, 'symbols.bt'),
-      'BEGIN { @workspace_marker = count(); print(@workspace_marker); }\n');
+    prepareWorkspace(workspace);
     // Only this empty harness is loaded in development mode. btfmt must come
     // from the installed VSIX, including its compiled client and native server.
     fs.writeFileSync(path.join(harness, 'package.json'), JSON.stringify({
@@ -48,6 +48,12 @@ async function main(): Promise<void> {
       },
       launchArgs: [workspace, ...profileArgs, '--disable-workspace-trust', '--skip-welcome'],
     });
+  } catch (error) {
+    const logs = path.join(root, 'profile/logs');
+    if (fs.existsSync(logs)) {
+      fs.cpSync(logs, path.resolve(__dirname, 'logs'), { recursive: true });
+    }
+    throw error;
   } finally {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }

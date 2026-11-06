@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runTests } from '@vscode/test-electron';
+import { prepareWorkspace } from './workspace';
 
 async function main(): Promise<void> {
   const extensionDevelopmentPath = path.resolve(__dirname, '../..');
@@ -24,10 +25,7 @@ async function main(): Promise<void> {
 
   const workspacePath = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-extension-')));
   try {
-    fs.writeFileSync(
-      path.join(workspacePath, 'symbols.bt'),
-      'BEGIN { @workspace_marker = count(); print(@workspace_marker); }\n'
-    );
+    prepareWorkspace(workspacePath);
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,

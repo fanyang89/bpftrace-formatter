@@ -82,7 +82,12 @@ jobs:
         run: cargo build --bin btfmt
 
       - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install --yes xvfb
+        timeout-minutes: 5
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install --yes xvfb
+          fi
 
       - name: Run Extension Host test
         working-directory: vscode-extension
@@ -92,6 +97,7 @@ jobs:
 
   build-binaries:
     needs: [validate-version, test]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -135,6 +141,9 @@ jobs:
 
       - name: Build btfmt
         run: cargo build --release --bin btfmt
+
+      - name: Test native workspace index
+        run: cargo test --lib lsp::workspace
 
       - name: Prepare binary
         shell: bash
@@ -184,18 +193,33 @@ jobs:
 
       - name: Install virtual display for packaged extension test
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes xvfb
+        timeout-minutes: 5
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install --yes xvfb
+          fi
 
       - name: Test packaged extension on Linux
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         working-directory: vscode-extension
         run: xvfb-run -a npm run test:vsix -- btfmt-${{ matrix.vscode_target }}-*.vsix
 
       - name: Test packaged extension on macOS and Windows
         if: runner.os != 'Linux'
+        timeout-minutes: 10
         working-directory: vscode-extension
         shell: bash
         run: npm run test:vsix -- btfmt-${{ matrix.vscode_target }}-*.vsix
+
+      - name: Upload packaged extension test logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: vscode-test-logs-${{ matrix.vscode_target }}
+          path: vscode-extension/out/test/logs
+          if-no-files-found: ignore
 
       - name: Upload extension artifact
         uses: actions/upload-artifact@v6
