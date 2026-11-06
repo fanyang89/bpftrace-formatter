@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { runTests } from '@vscode/test-electron';
 import { prepareWorkspace } from './workspace';
+import { debugPort } from './workbench';
 
 async function main(): Promise<void> {
   const extensionDevelopmentPath = path.resolve(__dirname, '../..');
@@ -26,10 +27,13 @@ async function main(): Promise<void> {
   const workspacePath = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-extension-')));
   try {
     prepareWorkspace(workspacePath);
+    const port = await debugPort();
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
-      launchArgs: [workspacePath, '--disable-extensions', '--disable-workspace-trust'],
+      extensionTestsEnv: { BTFMT_TEST_DEBUG_PORT: String(port) },
+      launchArgs: [workspacePath, '--disable-extensions', '--disable-workspace-trust',
+        '--enable-smoke-test-driver', `--remote-debugging-port=${port}`],
     });
   } finally {
     fs.rmSync(bundledBinary, { force: true });

@@ -2,10 +2,12 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { testEditingLifecycle } from './lifecycle';
+import { waitForWorkbench } from '../workbench';
 
 const extensionId = 'fanyang89.btfmt';
 
 export async function run(): Promise<void> {
+  await waitForWorkbench();
   const extension = vscode.extensions.getExtension(extensionId);
   assert.ok(extension, `extension not found: ${extensionId}`);
   const installedRoot = process.env.BTFMT_INSTALLED_EXTENSIONS;

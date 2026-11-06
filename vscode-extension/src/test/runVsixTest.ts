@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { runTests, runVSCodeCommand } from '@vscode/test-electron';
 import { prepareWorkspace } from './workspace';
+import { debugPort } from './workbench';
 
 async function main(): Promise<void> {
   const argument = process.argv[2];
@@ -39,14 +40,17 @@ async function main(): Promise<void> {
       ...profileArgs, '--install-extension', vsix, '--force',
     ]);
     process.stdout.write(installed.stdout);
+    const port = await debugPort();
     await runTests({
       extensionDevelopmentPath: harness,
       extensionTestsPath: path.resolve(__dirname, 'suite/index'),
       extensionTestsEnv: {
         BTFMT_INSTALLED_EXTENSIONS: extensions,
+        BTFMT_TEST_DEBUG_PORT: String(port),
         [pathKey]: poisonPath + path.delimiter + (process.env[pathKey] ?? ''),
       },
-      launchArgs: [workspace, ...profileArgs, '--disable-workspace-trust', '--skip-welcome', '--log', 'debug'],
+      launchArgs: [workspace, ...profileArgs, '--disable-workspace-trust', '--skip-welcome', '--log', 'debug',
+        '--enable-smoke-test-driver', `--remote-debugging-port=${port}`],
     });
   } catch (error) {
     const logs = path.join(root, 'profile/logs');

@@ -28,6 +28,10 @@ profile and runs the editor smoke suite before uploading the extension artifact.
 Only an empty test harness runs in development mode; the btfmt client and server
 come from the installed package. A failing `btfmt` executable placed first on
 PATH prevents accidental use of a developer's global server installation.
+Both editor test launchers enable VS Code's smoke-test driver on a temporary
+local debugging port. Before exercising the editor, the suite awaits
+`driver.whenWorkbenchRestored()`, including workbench contributions such as save
+participants; extension-host startup alone does not guarantee those are ready.
 
 Run the same check locally after packaging:
 
