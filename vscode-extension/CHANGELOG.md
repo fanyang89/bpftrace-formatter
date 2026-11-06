@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- Format selected statements and probes with syntax-aware range expansion and preserved surrounding content.
+- Preserve hand-formatted regions with standalone `// btfmt: off` and `// btfmt: on` comments in the CLI and editor.
+- Add semantic highlighting for variables, maps, macro parameters, and builtins, with TextMate fallback.
+- Search workspace maps, macros, and probe blocks with support for unsaved edits, ignore rules, and Restricted Mode.
+- Show builtin signature help and active-parameter hints, including while typing incomplete calls.
+- Format directories recursively from the CLI and preview unified diffs with `--diff` or `--check --diff`.
+
+### Fixed
+
+- Resolve Marketplace README images and documentation links from the extension subdirectory.
+- Refresh workspace symbols when `.ignore` or `.gitignore` files change.
+
 ## 0.3.3
 
 - Add an embedded tracepoint catalog for completion without kernel metadata access.
