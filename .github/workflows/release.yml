@@ -106,7 +106,7 @@ jobs:
             arch: amd64
             vscode_target: darwin-x64
             binary_name: btfmt
-          - os: macos-14
+          - os: macos-15
             platform: darwin
             arch: arm64
             vscode_target: darwin-arm64
