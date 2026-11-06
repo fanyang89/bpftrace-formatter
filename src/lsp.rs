@@ -1,6 +1,7 @@
 mod catalog;
 mod completion;
 mod probes;
+mod range_formatting;
 mod signature_help;
 mod snapshot;
 mod symbols;
@@ -139,6 +140,7 @@ impl LanguageServer for Backend {
                     },
                 )),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![
@@ -300,6 +302,22 @@ impl LanguageServer for Backend {
                 Ok(None)
             }
         }
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+        let Some(doc) = self.doc(&uri) else {
+            return Ok(Some(Vec::new()));
+        };
+        let config = self
+            .config_for_uri(&uri)
+            .map_err(|err| Error::invalid_params(format!("config load failed: {err:#}")))?;
+        range_formatting::format_range(&doc, params.range, &config)
+            .map(Some)
+            .map_err(|err| Error::invalid_params(format!("range formatting failed: {err:#}")))
     }
 
     async fn document_symbol(
