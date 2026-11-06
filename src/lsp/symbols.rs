@@ -93,6 +93,7 @@ struct Binding {
     occurrences: Vec<usize>,
     definition: Option<usize>,
     definition_is_declaration: bool,
+    is_parameter: bool,
 }
 
 #[derive(Debug)]
@@ -136,6 +137,41 @@ pub(super) struct SymbolIndex {
 }
 
 impl SymbolIndex {
+    pub(super) fn classified_occurrences(
+        &self,
+    ) -> impl Iterator<Item = (ByteRange, CompletionSymbolKind, bool)> + '_ {
+        let variables = self.occurrences.iter().map(|occurrence| {
+            let binding = &self.bindings[occurrence.binding];
+            let kind = if binding.is_parameter {
+                CompletionSymbolKind::Parameter
+            } else {
+                match binding.kind {
+                    SymbolKind::Scratch => CompletionSymbolKind::Scratch,
+                    SymbolKind::Map => CompletionSymbolKind::Map,
+                }
+            };
+            (
+                occurrence.range,
+                kind,
+                occurrence.access == AccessKind::Declaration,
+            )
+        });
+        let named = self.named_occurrences.iter().filter_map(|occurrence| {
+            let binding = &self.named_bindings[occurrence.binding];
+            let kind = match binding.kind {
+                NamedKind::Parameter => CompletionSymbolKind::Parameter,
+                NamedKind::Macro if !binding.definitions.is_empty() => CompletionSymbolKind::Macro,
+                NamedKind::Macro => return None,
+            };
+            Some((
+                occurrence.range,
+                kind,
+                occurrence.access == AccessKind::Declaration,
+            ))
+        });
+        variables.chain(named)
+    }
+
     pub(super) fn new(source: &str, tree: &Tree) -> Option<Self> {
         if tree.root_node().has_error() {
             return None;
@@ -703,6 +739,9 @@ impl SymbolIndex {
         });
         let binding = &mut self.bindings[binding];
         binding.occurrences.push(occurrence_idx);
+        binding.is_parameter |= node
+            .parent()
+            .is_some_and(|parent| parent.kind() == "macro_parameters");
 
         let is_definition = access == AccessKind::Declaration
             || (access == AccessKind::Write && (kind == SymbolKind::Map || plain_assignment));
@@ -759,6 +798,7 @@ impl SymbolIndex {
             occurrences: Vec::new(),
             definition: None,
             definition_is_declaration: false,
+            is_parameter: false,
         });
         self.scope_bindings[scope].insert(key, binding);
         binding
@@ -865,7 +905,13 @@ fn variable_identity(source: &str, node: Node<'_>) -> Option<(SymbolKind, String
     let mut end = node.end_byte();
     if kind == SymbolKind::Map {
         let text = source.get(start..end)?;
-        end = start + text.find('[').unwrap_or(text.len());
+        end = start
+            + 1
+            + text
+                .bytes()
+                .skip(1)
+                .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+                .count();
     }
     let text = source.get(start..end)?;
     let mut chars = text.chars();

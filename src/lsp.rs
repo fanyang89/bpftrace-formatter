@@ -2,6 +2,7 @@ mod catalog;
 mod completion;
 mod probes;
 mod range_formatting;
+mod semantic_tokens;
 mod signature_help;
 mod snapshot;
 mod symbols;
@@ -157,6 +158,7 @@ impl LanguageServer for Backend {
                     ..SignatureHelpOptions::default()
                 }),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(semantic_tokens::options().into()),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
@@ -335,6 +337,17 @@ impl LanguageServer for Backend {
             tree,
             &doc.line_index,
         ))))
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let tokens = self
+            .doc(&params.text_document.uri)
+            .map(|doc| semantic_tokens::full(&doc))
+            .unwrap_or_default();
+        Ok(Some(SemanticTokensResult::Tokens(tokens)))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

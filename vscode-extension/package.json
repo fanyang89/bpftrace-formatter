@@ -87,6 +87,22 @@
         "path": "./syntaxes/bpftrace.tmLanguage.json"
       }
     ],
+    "semanticTokenTypes": [
+      {
+        "id": "map",
+        "superType": "variable",
+        "description": "A bpftrace map."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "bpftrace",
+        "scopes": {
+          "map": ["variable.other.map.bpftrace"],
+          "event.defaultLibrary": ["keyword.other.probe.bpftrace"]
+        }
+      }
+    ],
     "languages": [
       {
         "id": "bpftrace",

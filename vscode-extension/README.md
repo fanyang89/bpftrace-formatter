@@ -19,7 +19,7 @@
 | Navigation | Definitions, references, highlights, and document symbols |
 | Refactoring | Scope-aware and cross-file rename |
 | Diagnostics | Syntax errors with UTF-16-correct ranges |
-| Syntax | TextMate highlighting for `.bt` files |
+| Syntax | Semantic highlighting with TextMate fallback for `.bt` files |
 
 ## Quick Start
 
@@ -63,7 +63,9 @@ Catalog entries are cross-kernel suggestions. Readable kernel metadata takes pre
 
 The extension runs where the workspace lives, including Remote SSH, WSL, and Dev Containers. Install the matching platform package in the remote Extension Host.
 
-Restricted Mode keeps current-document formatting, diagnostics, and static completion. Workspace indexing and system metadata access remain disabled until the workspace is trusted.
+Restricted Mode keeps current-document formatting, diagnostics, static completion, and semantic highlighting. Workspace indexing and system metadata access remain disabled until the workspace is trusted.
+
+See the [semantic token legend](../docs/semantic-highlighting.md) for classifications and customization.
 
 ## Privacy
 
