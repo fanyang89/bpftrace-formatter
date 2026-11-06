@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   fs.copyFileSync(path.resolve(source), bundledBinary);
   fs.chmodSync(bundledBinary, 0o755);
 
-  const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-extension-'));
+  const workspacePath = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-extension-')));
   try {
     fs.writeFileSync(
       path.join(workspacePath, 'symbols.bt'),

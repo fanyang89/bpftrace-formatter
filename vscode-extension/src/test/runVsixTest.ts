@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   if (!fs.statSync(vsix).isFile()) {
     throw new Error(`VSIX not found: ${vsix}`);
   }
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-vsix-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-vsix-')));
   try {
     const workspace = path.join(root, 'workspace');
     const harness = path.join(root, 'harness');
