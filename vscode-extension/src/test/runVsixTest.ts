@@ -46,7 +46,7 @@ async function main(): Promise<void> {
         BTFMT_INSTALLED_EXTENSIONS: extensions,
         [pathKey]: poisonPath + path.delimiter + (process.env[pathKey] ?? ''),
       },
-      launchArgs: [workspace, ...profileArgs, '--disable-workspace-trust', '--skip-welcome'],
+      launchArgs: [workspace, ...profileArgs, '--disable-workspace-trust', '--skip-welcome', '--log', 'debug'],
     });
   } catch (error) {
     const logs = path.join(root, 'profile/logs');

@@ -4,6 +4,7 @@ import * as path from 'path';
 export function prepareWorkspace(workspace: string): void {
   fs.mkdirSync(path.join(workspace, '.vscode'), { recursive: true });
   fs.writeFileSync(path.join(workspace, '.vscode/settings.json'), JSON.stringify({
+    'btfmt.trace.server': 'verbose',
     '[bpftrace]': {
       'editor.defaultFormatter': 'fanyang89.btfmt',
       'editor.formatOnSave': true,
