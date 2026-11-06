@@ -1,0 +1,14 @@
+#!/usr/bin/env bpftrace
+#define VALUE 1
+BEGIN{@before=1;
+  // btfmt: off
+    @first=  VALUE;     // keep alignment
+
+ @second   =2;
+  // btfmt: on
+@after=3;}
+END{
+// btfmt: off
+  print( @first ); print(@second);
+// btfmt: on
+exit();}

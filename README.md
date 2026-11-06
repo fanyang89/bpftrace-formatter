@@ -103,6 +103,10 @@ tracepoint:syscalls:sys_enter_openat
 
 </details>
 
+Preserve hand-formatted sections with standalone `// btfmt: off` and
+`// btfmt: on` comments. See [formatting suppression](docs/configuration.md#formatting-suppression)
+for matching rules and syntax-validation limits.
+
 ## CLI Inputs and Diffs
 
 File paths, directories, and `-` (stdin) can be mixed in one invocation. Directory

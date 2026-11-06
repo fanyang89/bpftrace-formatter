@@ -73,6 +73,50 @@ Use `--config-output <path>` to choose another destination. Existing files are p
 | `blocks.brace_style` | string | `"next_line"` | `"same_line"`, `"next_line"`, or `"gnu"` |
 | `blocks.indent_statements` | boolean | `true` | Indents statements inside blocks |
 
+## Formatting Suppression
+
+Use standalone line comments to preserve hand-formatted sections in both the CLI
+and LSP. No configuration option is required:
+
+```bpftrace
+BEGIN {
+    // btfmt: off
+    @first  = 1;   @second = 2;
+    // btfmt: on
+    printf("ready\n");
+}
+```
+
+- The exact, case-sensitive comment text is `// btfmt: off` or `// btfmt: on`.
+  Leading and trailing whitespace is allowed; LF and CRLF line
+  endings are supported. Extra comment text does not count as a directive.
+- The complete `off` line through the complete matching `on` line is preserved
+  byte-for-byte, including indentation, blank lines, trailing whitespace and line
+  endings. Surrounding code is formatted normally. A suppressed region ending at
+  EOF also retains the presence or absence of its final newline.
+- Multiple and adjacent regions are supported. Directives do not nest: repeated
+  `off` comments while disabled have no effect, and the first standalone `on`
+  resumes formatting. An unmatched `off` extends to EOF; an unmatched `on` is an
+  ordinary comment and does not disable anything.
+- Strings, block comments, inline comments and preprocessor regions do not
+  activate directives. Preprocessor regions retain their existing opaque handling;
+  place directives outside them to suppress surrounding code. Inline comments
+  with exact directive text remain inline even when `comments.preserve_inline` is
+  false, so another formatting pass cannot accidentally activate them.
+- Suppression affects layout only. The **entire document**, including disabled
+  regions, must still parse with the bundled `tree-sitter-bpftrace` grammar, and
+  the formatted result is validated too. It cannot hide malformed code or syntax
+  unsupported by that grammar. Regions may cross block or expression boundaries;
+  the formatter tracks their tokens to resume with the correct block state.
+
+Library integrations can call
+`btfmt::suppression::suppression_ranges(source) -> anyhow::Result<Vec<std::ops::Range<usize>>>`.
+It validates the source and returns sorted, disjoint, half-open UTF-8 byte ranges
+in the original document, including both directive lines. Detect ranges on the
+whole document before selecting a formatting range: an earlier `off` can suppress
+the selection. Do not independently format fragments that lose this context or
+reindent a preserved region; any overlapping edit must retain its bytes exactly.
+
 ## VS Code Settings
 
 | Setting | Default | Scope |

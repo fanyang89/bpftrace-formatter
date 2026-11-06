@@ -1,7 +1,9 @@
 use crate::config::{BraceStyle, Config};
 use crate::parse;
+use crate::suppression;
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenKind {
@@ -37,16 +39,51 @@ struct FormatHints {
 pub fn format_source(source: &str, config: &Config) -> Result<String> {
     let tree = parse::ensure_valid(source)?;
     let hints = format_hints(tree.root_node());
-    let formatted = format_tokens(&tokenize(source, &hints.protected_spans), &hints, config);
+    let ranges = suppression::ranges_from_tree(source, tree.root_node());
+    let formatted = format_tokens(
+        source,
+        &tokenize(source, &hints.protected_spans),
+        &hints,
+        &ranges,
+        config,
+    );
     parse::ensure_valid(&formatted).context("formatter produced invalid bpftrace output")?;
     Ok(formatted)
 }
 
-fn format_tokens(tokens: &[Token], hints: &FormatHints, config: &Config) -> String {
+fn format_tokens(
+    source: &str,
+    tokens: &[Token],
+    hints: &FormatHints,
+    ranges: &[Range<usize>],
+    config: &Config,
+) -> String {
     let mut writer = Writer::new(config);
     let mut top_level_block_closed = false;
+    let mut ranges = ranges.iter().peekable();
+    let mut suppressed_start = None;
 
     for (idx, token) in tokens.iter().enumerate() {
+        if let Some(range) = ranges.peek() {
+            if token.start >= range.end {
+                writer.restore_suppressed(
+                    suppressed_start.take().unwrap(),
+                    &source[(*range).clone()],
+                );
+                ranges.next();
+            }
+        }
+        if suppressed_start.is_none()
+            && ranges
+                .peek()
+                .is_some_and(|range| token.start >= range.start)
+        {
+            if !writer.at_line_start() {
+                writer.newline();
+            }
+            suppressed_start = Some(writer.out.len());
+            writer.verbatim_end = writer.out.len();
+        }
         if hints.predicate_starts.contains(&token.start) {
             writer.newline();
         }
@@ -65,7 +102,16 @@ fn format_tokens(tokens: &[Token], hints: &FormatHints, config: &Config) -> Stri
                     writer.blank_lines(config.line_breaks.empty_lines_between_probes);
                     top_level_block_closed = false;
                 }
-                writer.write_comment(&token.text);
+                if suppression::directive(&token.text).is_some() {
+                    if suppression::is_standalone(source, token.start) {
+                        writer.write_line_token(&token.text);
+                    } else {
+                        // Never turn an inert inline marker into a directive on the next pass.
+                        writer.write_inline_directive(&token.text);
+                    }
+                } else {
+                    writer.write_comment(&token.text);
+                }
             }
             TokenKind::Symbol => match token.text.as_str() {
                 "{" => {
@@ -107,6 +153,9 @@ fn format_tokens(tokens: &[Token], hints: &FormatHints, config: &Config) -> Stri
         }
     }
 
+    if let Some(start) = suppressed_start {
+        writer.restore_suppressed(start, &source[ranges.next().unwrap().clone()]);
+    }
     writer.finish()
 }
 
@@ -190,6 +239,7 @@ struct Writer<'a> {
     indent: usize,
     line_has_content: bool,
     pending_space: bool,
+    verbatim_end: usize,
 }
 
 impl<'a> Writer<'a> {
@@ -200,15 +250,37 @@ impl<'a> Writer<'a> {
             indent: 0,
             line_has_content: false,
             pending_space: false,
+            verbatim_end: 0,
         }
     }
 
     fn finish(mut self) -> String {
-        while self.out.ends_with([' ', '\t', '\n']) {
+        while self.out.len() > self.verbatim_end && self.out.ends_with([' ', '\t', '\n']) {
             self.out.pop();
         }
-        self.out.push('\n');
+        if self.out.len() > self.verbatim_end || self.verbatim_end == 0 {
+            self.out.push('\n');
+        }
         self.out
+    }
+
+    fn restore_suppressed(&mut self, start: usize, source: &str) {
+        // Replay tokens normally to retain block/layout state, then replace only
+        // their output. The protected prefix must survive later whitespace cleanup.
+        self.out.truncate(start);
+        self.out.push_str(source);
+        self.verbatim_end = self.out.len();
+        self.line_has_content = !source.ends_with('\n');
+        self.pending_space = false;
+    }
+
+    fn write_inline_directive(&mut self, text: &str) {
+        while self.out.len() > self.verbatim_end && self.out.ends_with('\n') {
+            self.out.pop();
+        }
+        self.out.push(' ');
+        self.out.push_str(text.trim_end());
+        self.newline();
     }
 
     fn at_line_start(&self) -> bool {
@@ -395,10 +467,17 @@ impl<'a> Writer<'a> {
         if self.line_has_content {
             self.newline();
         }
-        while self.out.ends_with('\n') {
+        while self.out.len() > self.verbatim_end && self.out.ends_with('\n') {
             self.out.pop();
         }
-        self.out.push_str(&"\n".repeat(count + 1));
+        let existing = self
+            .out
+            .bytes()
+            .rev()
+            .take_while(|byte| *byte == b'\n')
+            .count();
+        self.out
+            .push_str(&"\n".repeat((count + 1).saturating_sub(existing)));
         self.line_has_content = false;
         self.pending_space = false;
     }
