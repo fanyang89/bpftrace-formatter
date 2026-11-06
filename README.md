@@ -136,7 +136,7 @@ not each discovered file's directory (see [Configuration](docs/configuration.md)
 | Capability | Scope |
 | --- | --- |
 | Completion | Builtins, providers, keywords, variables, maps, macro parameters, imported macros, probe targets, and `args` fields |
-| Navigation | Definitions, references, highlights, and document symbols |
+| Navigation | Definitions, references, highlights, document symbols, and [workspace symbol search](docs/workspace-symbols.md) |
 | Rename | Lexical variables plus workspace-wide maps and macro families |
 | Hover | Versioned bpftrace builtin documentation |
 | Signature help | Parameter documentation and active-parameter hints for supported builtin calls, including incomplete calls |

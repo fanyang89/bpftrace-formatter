@@ -8,6 +8,7 @@ mod snapshot;
 mod symbols;
 mod tracepoint_catalog;
 mod workspace;
+mod workspace_symbols;
 
 use self::snapshot::DocumentSnapshot;
 use self::symbols::{
@@ -159,6 +160,7 @@ impl LanguageServer for Backend {
                 }),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(semantic_tokens::options().into()),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
@@ -348,6 +350,19 @@ impl LanguageServer for Backend {
             .map(|doc| semantic_tokens::full(&doc))
             .unwrap_or_default();
         Ok(Some(SemanticTokensResult::Tokens(tokens)))
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let trusted = self.is_trusted();
+        let workspace = self.workspace.lock().expect("workspace index poisoned");
+        Ok(Some(workspace_symbols::search(
+            &workspace,
+            &params.query,
+            trusted,
+        )))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

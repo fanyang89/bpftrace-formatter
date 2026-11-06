@@ -7,6 +7,8 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 use tree_sitter::Node;
 
+mod paths;
+
 const MAX_FILES: usize = 5_000;
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
@@ -16,6 +18,7 @@ pub(super) struct WorkspaceIndex {
     roots: Vec<PathBuf>,
     disk: HashMap<Url, Arc<DocumentSnapshot>>,
     overlays: HashMap<Url, Arc<DocumentSnapshot>>,
+    symbol_overlays: HashSet<Url>,
     forward: HashMap<Url, Vec<Url>>,
     reverse: HashMap<Url, HashSet<Url>>,
     ready: bool,
@@ -28,6 +31,8 @@ impl WorkspaceIndex {
             .iter()
             .filter_map(|root| fs::canonicalize(root).ok())
             .collect();
+        self.roots.sort();
+        self.roots.dedup();
         self.disk.clear();
         self.incomplete = false;
         let mut total_bytes = 0u64;
@@ -36,10 +41,19 @@ impl WorkspaceIndex {
             builder
                 .standard_filters(true)
                 .hidden(true)
-                .follow_links(false);
+                .follow_links(false)
+                .sort_by_file_path(|left, right| left.cmp(right));
             for entry in builder.build().filter_map(Result::ok) {
                 let path = entry.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("bt") {
+                if path.extension().and_then(|ext| ext.to_str()) != Some("bt")
+                    || !entry.file_type().is_some_and(|kind| kind.is_file())
+                {
+                    continue;
+                }
+                let Ok(uri) = Url::from_file_path(path) else {
+                    continue;
+                };
+                if self.disk.contains_key(&uri) {
                     continue;
                 }
                 if self.disk.len() >= MAX_FILES {
@@ -58,25 +72,35 @@ impl WorkspaceIndex {
                 let Ok(text) = fs::read_to_string(path) else {
                     continue;
                 };
-                let Ok(uri) = Url::from_file_path(path) else {
-                    continue;
-                };
                 let (snapshot, _) = DocumentSnapshot::analyze(text, None);
                 total_bytes += metadata.len();
                 self.disk.insert(uri, snapshot);
             }
         }
         self.ready = true;
+        self.symbol_overlays = self
+            .overlays
+            .keys()
+            .filter(|uri| self.symbol_path_is_eligible(uri))
+            .cloned()
+            .collect();
         self.rebuild_graph();
     }
 
     pub(super) fn set_overlay(&mut self, uri: Url, snapshot: Arc<DocumentSnapshot>) {
+        if self.symbol_path_is_eligible(&uri) {
+            self.symbol_overlays.insert(uri.clone());
+        } else {
+            self.symbol_overlays.remove(&uri);
+            self.disk.remove(&uri);
+        }
         self.overlays.insert(uri, snapshot);
         self.rebuild_graph();
     }
 
     pub(super) fn remove_overlay(&mut self, uri: &Url) {
         self.overlays.remove(uri);
+        self.symbol_overlays.remove(uri);
         self.rebuild_graph();
     }
 
@@ -84,8 +108,22 @@ impl WorkspaceIndex {
         let Ok(path) = uri.to_file_path() else {
             return;
         };
-        if !self.path_is_in_workspace(&path) {
+        if matches!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(".ignore" | ".gitignore")
+        ) {
+            let roots = self.roots.clone();
+            self.scan(&roots);
             return;
+        }
+        if !self.symbol_path_is_eligible(uri) {
+            self.disk.remove(uri);
+            self.symbol_overlays.remove(uri);
+            self.rebuild_graph();
+            return;
+        }
+        if self.overlays.contains_key(uri) {
+            self.symbol_overlays.insert(uri.clone());
         }
         match fs::read_to_string(&path) {
             Ok(text) if path.extension().and_then(|ext| ext.to_str()) == Some("bt") => {
@@ -100,6 +138,16 @@ impl WorkspaceIndex {
     }
 
     pub(super) fn remove_disk(&mut self, uri: &Url) {
+        if uri.to_file_path().ok().is_some_and(|path| {
+            matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some(".ignore" | ".gitignore")
+            )
+        }) {
+            let roots = self.roots.clone();
+            self.scan(&roots);
+            return;
+        }
         self.disk.remove(uri);
         self.rebuild_graph();
     }
@@ -109,6 +157,26 @@ impl WorkspaceIndex {
             .get(uri)
             .or_else(|| self.disk.get(uri))
             .map(Arc::clone)
+    }
+
+    pub(super) fn symbol_snapshots(&self) -> Vec<(Url, Arc<DocumentSnapshot>)> {
+        if !self.ready {
+            return Vec::new();
+        }
+        let uris: HashSet<_> = self
+            .disk
+            .keys()
+            .chain(self.symbol_overlays.iter())
+            .collect();
+        uris.into_iter()
+            .filter_map(|uri| self.snapshot(uri).map(|snapshot| (uri.clone(), snapshot)))
+            .collect()
+    }
+
+    fn symbol_path_is_eligible(&self, uri: &Url) -> bool {
+        uri.to_file_path()
+            .ok()
+            .is_some_and(|path| paths::is_eligible(&path, &self.roots))
     }
 
     pub(super) fn program_files(&self, uri: &Url) -> Vec<Url> {

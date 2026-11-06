@@ -285,6 +285,34 @@ impl SymbolIndex {
         }
     }
 
+    pub(super) fn global_definitions(&self) -> Vec<(GlobalSymbolTarget, ByteRange)> {
+        let maps = self.bindings.iter().filter_map(|binding| {
+            if binding.kind != SymbolKind::Map || binding.scope != 0 {
+                return None;
+            }
+            Some((
+                GlobalSymbolTarget {
+                    kind: GlobalSymbolKind::Map,
+                    name: binding.name.clone(),
+                },
+                self.occurrences[binding.definition?].range,
+            ))
+        });
+        let macros = self.named_bindings.iter().filter_map(|binding| {
+            if binding.kind != NamedKind::Macro || binding.scope != 0 {
+                return None;
+            }
+            Some((
+                GlobalSymbolTarget {
+                    kind: GlobalSymbolKind::Macro,
+                    name: binding.name.clone(),
+                },
+                self.named_occurrences[*binding.definitions.first()?].range,
+            ))
+        });
+        maps.chain(macros).collect()
+    }
+
     pub(super) fn normalize_global_rename(
         target: &GlobalSymbolTarget,
         new_name: &str,
