@@ -1,0 +1,40 @@
+diff --git a/node_modules/vscode-languageclient/lib/common/client.js b/node_modules/vscode-languageclient/lib/common/client.js
+--- a/node_modules/vscode-languageclient/lib/common/client.js
++++ b/node_modules/vscode-languageclient/lib/common/client.js
+@@ -998,6 +998,7 @@ class BaseLanguageClient {
+         // purge outstanding file events.
+         this._fileEvents = [];
+         this._fileEventDelayer.cancel();
++        this._pendingChangeDelayer.cancel();
+         const disposables = this._listeners.splice(0, this._listeners.length);
+         for (const disposable of disposables) {
+             disposable.dispose();
+diff --git a/node_modules/vscode-languageclient/lib/common/utils/async.js b/node_modules/vscode-languageclient/lib/common/utils/async.js
+--- a/node_modules/vscode-languageclient/lib/common/utils/async.js
++++ b/node_modules/vscode-languageclient/lib/common/utils/async.js
+@@ -25,9 +25,9 @@ class Delayer {
+             }).then(() => {
+                 this.completionPromise = undefined;
+                 this.onSuccess = undefined;
+-                var result = this.task();
++                const task = this.task;
+                 this.task = undefined;
+-                return result;
++                return task();
+             });
+         }
+         if (delay >= 0 || this.timeout === void 0) {
+@@ -43,11 +43,11 @@ class Delayer {
+             return undefined;
+         }
+         this.cancelTimeout();
+-        let result = this.task();
++        const task = this.task;
+         this.completionPromise = undefined;
+         this.onSuccess = undefined;
+         this.task = undefined;
+-        return result;
++        return task();
+     }
+     isTriggered() {
+         return this.timeout !== undefined;

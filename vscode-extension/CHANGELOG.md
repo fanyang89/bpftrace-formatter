@@ -18,6 +18,7 @@
 - Match canonical workspace roots to LSP file paths on Windows so unsaved symbols remain searchable.
 - Preserve workspace-root path aliases when indexing files and resolving imports on macOS and Windows.
 - Unify encoded file URI keys so open buffers replace disk symbols on Windows.
+- Cancel pending document synchronization when restarting the language client.
 
 ## 0.3.3
 

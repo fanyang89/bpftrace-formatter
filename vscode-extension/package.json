@@ -138,8 +138,10 @@
     }
   },
   "scripts": {
+    "postinstall": "patch-package --error-on-fail",
+    "test:client": "node --test scripts/languageclient.test.cjs",
     "compile": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
-    "test": "npm run compile && npm run test:compile && node ./out/test/runTest.js",
+    "test": "npm run test:client && npm run compile && npm run test:compile && node ./out/test/runTest.js",
     "test:vsix": "npm run test:compile && node ./out/test/runVsixTest.js",
     "test:compile": "esbuild ./src/test/runTest.ts ./src/test/runVsixTest.ts --bundle --outdir=out/test --platform=node --format=cjs && esbuild ./src/test/suite/index.ts --bundle --outfile=out/test/suite/index.js --external:vscode --platform=node --format=cjs",
     "typecheck": "tsc --noEmit",
@@ -155,6 +157,7 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.27.3",
+    "patch-package": "8.0.1",
     "typescript": "^5.4.5"
   }
 }
