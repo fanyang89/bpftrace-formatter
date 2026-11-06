@@ -145,7 +145,8 @@ not each discovered file's directory (see [Configuration](docs/configuration.md)
 | Hover | Versioned bpftrace builtin documentation |
 | Signature help | Parameter documentation and active-parameter hints for supported builtin calls, including incomplete calls |
 | Diagnostics | Syntax errors with UTF-16-correct editor ranges |
-| Formatting | Shared CLI/LSP engine and per-workspace `.btfmt.json` |
+| Highlighting | [Semantic tokens](docs/semantic-highlighting.md) with TextMate fallback in VS Code |
+| Formatting | Shared CLI/LSP engine, [selection formatting](docs/range-formatting.md), suppression comments, and per-workspace `.btfmt.json` |
 
 Probe completion never invokes `sudo` or runs bpftrace. It combines symbols observed in the workspace, portable event catalogs, and kernel metadata readable by the current user. Missing kernel access is a normal limited-data environment, not an error.
 

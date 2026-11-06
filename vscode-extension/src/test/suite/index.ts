@@ -29,6 +29,96 @@ export async function run(): Promise<void> {
   );
   assert.ok(!unchangedEdits || unchangedEdits.length === 0);
 
+  const selectionSource = 'BEGIN{exit();}\nEND{exit();}\n';
+  const selectionDocument = await vscode.workspace.openTextDocument({
+    language: 'bpftrace',
+    content: selectionSource,
+  });
+  const selectionEdits = await vscode.commands.executeCommand<vscode.TextEdit[]>(
+    'vscode.executeFormatRangeProvider',
+    selectionDocument.uri,
+    new vscode.Range(0, 0, 0, 'BEGIN{exit();}'.length),
+    { tabSize: 4, insertSpaces: true }
+  );
+  assert.ok(selectionEdits?.length, 'range formatting provider returned no edits');
+  assert.strictEqual(
+    applyTextEdits(selectionDocument, selectionEdits),
+    expected + 'END{exit();}\n'
+  );
+
+  const suppressedSource = '// btfmt: off\nBEGIN{exit();}\n// btfmt: on\n';
+  const suppressedDocument = await vscode.workspace.openTextDocument({
+    language: 'bpftrace',
+    content: suppressedSource + 'END{exit();}\n',
+  });
+  const suppressedEdits = await formattingEdits(suppressedDocument.uri);
+  assert.strictEqual(
+    applyTextEdits(suppressedDocument, suppressedEdits),
+    suppressedSource + 'END\n{\n    exit();\n}\n'
+  );
+
+  const semanticDocument = await vscode.workspace.openTextDocument({
+    language: 'bpftrace',
+    content: 'BEGIN { $value = 1; @count = $value; print(@count); }\n',
+  });
+  const legend = await vscode.commands.executeCommand<vscode.SemanticTokensLegend>(
+    'vscode.provideDocumentSemanticTokensLegend',
+    semanticDocument.uri
+  );
+  assert.ok(legend, 'semantic tokens provider did not register a legend');
+  const tokens = await vscode.commands.executeCommand<vscode.SemanticTokens>(
+    'vscode.provideDocumentSemanticTokens',
+    semanticDocument.uri
+  );
+  assert.ok(tokens?.data.length, 'semantic tokens provider returned no tokens');
+  assert.strictEqual(tokens.data.length % 5, 0);
+  let line = 0;
+  let character = 0;
+  const highlighted = new Map<string, string>();
+  for (let index = 0; index < tokens.data.length; index += 5) {
+    const [deltaLine, deltaStart, length, tokenType] = tokens.data.slice(index, index + 5);
+    line += deltaLine;
+    character = deltaLine === 0 ? character + deltaStart : deltaStart;
+    highlighted.set(
+      semanticDocument.getText(new vscode.Range(line, character, line, character + length)),
+      legend.tokenTypes[tokenType]
+    );
+  }
+  assert.strictEqual(highlighted.get('$value'), 'variable');
+  assert.ok(highlighted.has('@count'), 'maps were not semantically highlighted');
+  assert.strictEqual(highlighted.get('print'), 'function');
+
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  assert.ok(workspaceFolder, 'test workspace was not opened');
+  const workspaceUri = vscode.Uri.joinPath(workspaceFolder.uri, 'symbols.bt');
+  const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+    'vscode.executeWorkspaceSymbolProvider',
+    'workspace_marker'
+  );
+  assert.strictEqual(symbols?.length, 1, 'workspace symbols were missing or duplicated');
+  assert.strictEqual(symbols[0].name, '@workspace_marker');
+  assert.strictEqual(symbols[0].location.uri.toString(), workspaceUri.toString());
+
+  const workspaceDocument = await vscode.workspace.openTextDocument(workspaceUri);
+  const change = new vscode.WorkspaceEdit();
+  change.replace(
+    workspaceUri,
+    new vscode.Range(0, 0, workspaceDocument.lineCount, 0),
+    'BEGIN { @unsaved_marker = count(); }\n'
+  );
+  assert.ok(await vscode.workspace.applyEdit(change));
+  const updatedSymbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+    'vscode.executeWorkspaceSymbolProvider',
+    'unsaved_marker'
+  );
+  assert.strictEqual(updatedSymbols?.length, 1, 'unsaved workspace symbols were not updated');
+  assert.strictEqual(updatedSymbols[0].name, '@unsaved_marker');
+  const oldSymbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+    'vscode.executeWorkspaceSymbolProvider',
+    'workspace_marker'
+  );
+  assert.strictEqual(oldSymbols?.length, 0, 'workspace symbol search returned stale data');
+
   const completions = await completionItems(document.uri, new vscode.Position(0, 8));
   assert.ok(
     completions.items.some((item) => item.label === 'exit'),

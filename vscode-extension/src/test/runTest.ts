@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { runTests } from '@vscode/test-electron';
 
@@ -21,15 +22,21 @@ async function main(): Promise<void> {
   fs.copyFileSync(path.resolve(source), bundledBinary);
   fs.chmodSync(bundledBinary, 0o755);
 
+  const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), 'btfmt-extension-'));
   try {
+    fs.writeFileSync(
+      path.join(workspacePath, 'symbols.bt'),
+      'BEGIN { @workspace_marker = count(); print(@workspace_marker); }\n'
+    );
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
-      launchArgs: ['--disable-extensions'],
+      launchArgs: [workspacePath, '--disable-extensions', '--disable-workspace-trust'],
     });
   } finally {
     fs.rmSync(bundledBinary, { force: true });
     fs.rmdirSync(binDir);
+    fs.rmSync(workspacePath, { recursive: true, force: true });
   }
 }
 

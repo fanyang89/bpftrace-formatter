@@ -14,9 +14,9 @@
 
 | Feature | Support |
 | --- | --- |
-| Formatting | Document and format-on-save |
+| Formatting | Document, selection, format-on-save, and suppression comments |
 | Completion | Builtins, providers, probe targets, `args` fields, variables, maps, and macros |
-| Navigation | Definitions, references, highlights, and document symbols |
+| Navigation | Definitions, references, highlights, document symbols, and workspace symbol search |
 | Refactoring | Scope-aware and cross-file rename |
 | Diagnostics | Syntax errors with UTF-16-correct ranges |
 | Syntax | Semantic highlighting with TextMate fallback for `.bt` files |
@@ -33,6 +33,11 @@ Open a `.bt` file and run **Format Document**. To enable format on save:
 ```
 
 The extension uses its bundled `btfmt` server by default. No separate formatter installation is required.
+
+Use **Format Selection** to format complete statements or probes around a selection;
+see [range expansion and safe no-ops](../docs/range-formatting.md). Standalone
+`// btfmt: off` and `// btfmt: on` comments preserve hand-formatted regions.
+**Go to Symbol in Workspace** searches indexed maps, macros, and probe blocks.
 
 Platform-specific VSIX files are available from [GitHub Releases](https://github.com/fanyang89/bpftrace-formatter/releases/latest).
 

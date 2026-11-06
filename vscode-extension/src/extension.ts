@@ -36,7 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
     language: 'bpftrace',
   });
   status.name = 'btfmt';
-  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.bt');
+  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/{*.bt,.gitignore,.ignore}');
   context.subscriptions.push(log, status, fileWatcher);
 
   context.subscriptions.push(
