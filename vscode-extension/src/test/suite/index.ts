@@ -1,11 +1,19 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as vscode from 'vscode';
+import { testEditingLifecycle } from './lifecycle';
 
 const extensionId = 'fanyang89.btfmt';
 
 export async function run(): Promise<void> {
   const extension = vscode.extensions.getExtension(extensionId);
   assert.ok(extension, `extension not found: ${extensionId}`);
+  const installedRoot = process.env.BTFMT_INSTALLED_EXTENSIONS;
+  if (installedRoot) {
+    assert.strictEqual(path.dirname(path.relative(installedRoot, extension.extensionPath)), '.');
+    assert.strictEqual(vscode.workspace.getConfiguration('btfmt').get('serverPath'), '');
+    console.log(`Testing installed extension: ${extension.extensionPath}`);
+  }
   await extension.activate();
   assert.strictEqual(extension.isActive, true);
 
@@ -162,6 +170,7 @@ export async function run(): Promise<void> {
   const restartedEdits = await formattingEdits(document.uri);
   assert.ok(restartedEdits.length > 0, 'formatting failed after LSP restart');
   assert.strictEqual(applyTextEdits(document, restartedEdits), expected);
+  await testEditingLifecycle();
 }
 
 function applyTextEdits(

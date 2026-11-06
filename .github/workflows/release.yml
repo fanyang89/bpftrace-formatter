@@ -182,6 +182,21 @@ jobs:
         working-directory: vscode-extension
         run: node scripts/package.mjs "${{ matrix.vscode_target }}" "../target/release/${{ matrix.binary_name }}" release
 
+      - name: Install virtual display for packaged extension test
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes xvfb
+
+      - name: Test packaged extension on Linux
+        if: runner.os == 'Linux'
+        working-directory: vscode-extension
+        run: xvfb-run -a npm run test:vsix -- btfmt-${{ matrix.vscode_target }}-*.vsix
+
+      - name: Test packaged extension on macOS and Windows
+        if: runner.os != 'Linux'
+        working-directory: vscode-extension
+        shell: bash
+        run: npm run test:vsix -- btfmt-${{ matrix.vscode_target }}-*.vsix
+
       - name: Upload extension artifact
         uses: actions/upload-artifact@v6
         with:
