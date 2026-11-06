@@ -16,6 +16,7 @@
 - Resolve Marketplace README images and documentation links from the extension subdirectory.
 - Refresh workspace symbols when `.ignore` or `.gitignore` files change.
 - Match canonical workspace roots to LSP file paths on Windows so unsaved symbols remain searchable.
+- Preserve workspace-root path aliases when indexing files and resolving imports on macOS and Windows.
 
 ## 0.3.3
 

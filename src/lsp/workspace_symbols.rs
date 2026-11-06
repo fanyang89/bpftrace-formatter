@@ -291,6 +291,32 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn workspace_root_alias_preserves_document_identity_and_unsaved_edits() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real");
+        let alias = dir.path().join("alias");
+        fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        fs::write(
+            real.join("main.bt"),
+            "import \"helper.bt\"; BEGIN { @disk = 1; }",
+        )
+        .unwrap();
+        fs::write(real.join("helper.bt"), "BEGIN { @helper = 1; }").unwrap();
+        let file = alias.join("main.bt");
+        let mut index = WorkspaceIndex::default();
+        index.scan(std::slice::from_ref(&alias));
+        assert_eq!(search(&index, "@disk", true)[0].location.uri, uri(&file));
+        assert_eq!(index.program_files(&uri(&file)).len(), 2);
+        overlay(&mut index, &file, "BEGIN { @unsaved = 1; }");
+        assert_eq!(names(&index, "@"), ["@helper", "@unsaved"]);
+        assert_eq!(search(&index, "@unsaved", true)[0].location.uri, uri(&file));
+        index.remove_overlay(&uri(&file));
+        assert_eq!(names(&index, "@"), ["@disk", "@helper"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn symlinks_cannot_expose_files_outside_the_workspace() {
         let dir = tempdir().unwrap();
         let root = dir.path().join("root");

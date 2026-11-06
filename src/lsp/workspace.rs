@@ -29,7 +29,7 @@ impl WorkspaceIndex {
     pub(super) fn scan(&mut self, roots: &[PathBuf]) {
         self.roots = roots
             .iter()
-            .filter_map(|root| paths::canonicalize(root))
+            .filter_map(|root| Url::from_file_path(root).ok()?.to_file_path().ok())
             .collect();
         self.roots.sort();
         self.roots.dedup();
@@ -245,12 +245,9 @@ impl WorkspaceIndex {
         let mut targets = HashSet::new();
         for spec in specs {
             let target = parent.join(spec);
-            let Some(target) = paths::canonicalize(&target) else {
+            let Some(target) = self.workspace_path(&target) else {
                 continue;
             };
-            if !self.path_is_in_workspace(&target) {
-                continue;
-            }
             if target.is_dir() {
                 for uri in self.disk.keys().chain(self.overlays.keys()) {
                     let Ok(path) = uri.to_file_path() else {
@@ -306,9 +303,15 @@ impl WorkspaceIndex {
         }
     }
 
-    fn path_is_in_workspace(&self, path: &Path) -> bool {
-        paths::canonicalize(path)
-            .is_some_and(|path| self.roots.iter().any(|root| path.starts_with(root)))
+    fn workspace_path(&self, path: &Path) -> Option<PathBuf> {
+        let canonical = paths::canonicalize(path)?;
+        // Resolve imports for containment checks, then retain the client's root
+        // spelling so disk snapshots and open-document URIs share the same keys.
+        self.roots.iter().find_map(|root| {
+            let canonical_root = paths::canonicalize(root)?;
+            let relative = canonical.strip_prefix(canonical_root).ok()?;
+            Some(root.join(relative))
+        })
     }
 }
 
