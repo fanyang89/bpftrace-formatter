@@ -1,6 +1,14 @@
 use ignore::gitignore::Gitignore;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use tower_lsp::lsp_types::Url;
+
+pub(super) fn canonicalize(path: &Path) -> Option<PathBuf> {
+    let path = fs::canonicalize(path).ok()?;
+    // Windows canonical paths use a verbatim prefix (\\?\), while LSP file
+    // URIs decode to ordinary paths. Compare both in the URI representation.
+    Url::from_file_path(path).ok()?.to_file_path().ok()
+}
 
 // Apply the walker's standard path filters to individual lifecycle updates, including
 // file-backed buffers that do not exist on disk yet. This does not walk directories.
@@ -68,4 +76,24 @@ pub(super) fn is_eligible(path: &Path, roots: &[PathBuf]) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_roots_match_lsp_paths_for_saved_and_unsaved_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let canonical = fs::canonicalize(directory.path()).unwrap();
+        let root = canonicalize(directory.path()).unwrap();
+        for name in ["saved.bt", "unsaved.bt"] {
+            let path = canonical.join(name);
+            if name == "saved.bt" {
+                fs::write(&path, "BEGIN {}").unwrap();
+            }
+            let uri_path = Url::from_file_path(&path).unwrap().to_file_path().unwrap();
+            assert!(is_eligible(&uri_path, std::slice::from_ref(&root)));
+        }
+    }
 }

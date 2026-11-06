@@ -29,7 +29,7 @@ impl WorkspaceIndex {
     pub(super) fn scan(&mut self, roots: &[PathBuf]) {
         self.roots = roots
             .iter()
-            .filter_map(|root| fs::canonicalize(root).ok())
+            .filter_map(|root| paths::canonicalize(root))
             .collect();
         self.roots.sort();
         self.roots.dedup();
@@ -245,7 +245,7 @@ impl WorkspaceIndex {
         let mut targets = HashSet::new();
         for spec in specs {
             let target = parent.join(spec);
-            let Ok(target) = fs::canonicalize(target) else {
+            let Some(target) = paths::canonicalize(&target) else {
                 continue;
             };
             if !self.path_is_in_workspace(&target) {
@@ -307,8 +307,7 @@ impl WorkspaceIndex {
     }
 
     fn path_is_in_workspace(&self, path: &Path) -> bool {
-        fs::canonicalize(path)
-            .ok()
+        paths::canonicalize(path)
             .is_some_and(|path| self.roots.iter().any(|root| path.starts_with(root)))
     }
 }
