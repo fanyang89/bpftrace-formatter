@@ -15,6 +15,10 @@
     "type": "git",
     "url": "https://github.com/fanyang89/bpftrace-formatter.git"
   },
+  "vsce": {
+    "baseContentUrl": "https://github.com/fanyang89/bpftrace-formatter/blob/main/vscode-extension/",
+    "baseImagesUrl": "https://raw.githubusercontent.com/fanyang89/bpftrace-formatter/main/vscode-extension/"
+  },
   "homepage": "https://github.com/fanyang89/bpftrace-formatter#readme",
   "bugs": {
     "url": "https://github.com/fanyang89/bpftrace-formatter/issues"

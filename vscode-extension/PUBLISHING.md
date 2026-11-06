@@ -23,4 +23,6 @@ The initial Marketplace release uses manual upload so the repository does not re
 
 ## Automation
 
+Keep the `vsce.baseContentUrl` and `vsce.baseImagesUrl` settings in `package.json` pointed at the extension subdirectory. The Marketplace README uses these URLs for relative links and images; `vsce` otherwise assumes the repository root.
+
 Future Marketplace automation must use Microsoft Entra ID workload identity federation. Do not add a long-lived `VSCE_PAT`; global Azure DevOps PATs retire on December 1, 2026.
