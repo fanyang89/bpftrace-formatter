@@ -219,44 +219,10 @@ fn same_syntax(before: Node<'_>, source: &str, after: Node<'_>, formatted: &str)
     })
 }
 
-// Temporary integration boundary for #43: replace this guard with the shared
-// suppression-span helper once available. Only standalone parsed line comments
-// count; strings and block comments containing directive text do not.
 fn suppression_intersects(source: &str, root: Node<'_>, effective: &ByteRange<usize>) -> bool {
-    fn collect(node: Node<'_>, source: &str, directives: &mut Vec<(ByteRange<usize>, bool)>) {
-        if node.kind() == "line_comment" {
-            let start = source[..node.start_byte()]
-                .rfind('\n')
-                .map_or(0, |offset| offset + 1);
-            if source[start..node.start_byte()].trim().is_empty() {
-                let text = source[node.byte_range()].trim_end();
-                if matches!(text, "// btfmt: off" | "// btfmt: on") {
-                    directives.push((start..node.end_byte(), text == "// btfmt: off"));
-                }
-            }
-            return;
-        }
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            collect(child, source, directives);
-        }
-    }
-    let mut directives = Vec::new();
-    collect(root, source, &mut directives);
-    let mut disabled = None;
-    for (range, off) in directives {
-        if overlaps(range.clone(), effective) {
-            return true;
-        }
-        if off {
-            disabled.get_or_insert(range.start);
-        } else if let Some(start) = disabled.take() {
-            if overlaps(start..range.end, effective) {
-                return true;
-            }
-        }
-    }
-    disabled.is_some_and(|start| overlaps(start..source.len(), effective))
+    crate::suppression::ranges_from_tree(source, root)
+        .into_iter()
+        .any(|range| overlaps(range, effective))
 }
 
 #[cfg(test)]
@@ -444,5 +410,32 @@ mod tests {
         assert!(edits("BEGIN{\n// btfmt: off\n$x=1;\n}", "$x", &config).is_empty());
         let source = "BEGIN{ /* // btfmt: off */ $x=1;}";
         assert!(!edits(source, "$x", &config).is_empty());
+    }
+
+    #[test]
+    fn range_formatting_uses_shared_suppression_semantics_and_preserves_regions() {
+        let config = Config::default();
+        let source = concat!(
+            "#ifdef TEST\n// btfmt: off\n#define VALUE 1\n#endif\n",
+            "BEGIN {\n $before=1;\n",
+            " \t// btfmt: off\r\n $kept=  2;  \r\n",
+            "// btfmt: off\n// btfmt: on\n",
+            " $after=3;\n// btfmt: on\n}\n",
+        );
+        assert!(edits(source, "$kept", &config).is_empty());
+        for selection in ["$before", "$after"] {
+            let changes = edits(source, selection, &config);
+            assert_eq!(changes.len(), 1);
+            let result = apply(source, &changes);
+            let original_regions = crate::suppression::suppression_ranges(source).unwrap();
+            let updated_regions = crate::suppression::suppression_ranges(&result).unwrap();
+            assert_eq!(original_regions.len(), 1);
+            assert_eq!(updated_regions.len(), 1);
+            assert_eq!(
+                source[original_regions[0].clone()],
+                result[updated_regions[0].clone()]
+            );
+            assert!(edits(&result, selection, &config).is_empty());
+        }
     }
 }

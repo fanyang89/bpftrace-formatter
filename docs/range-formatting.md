@@ -39,11 +39,14 @@ directive can still be formatted. Formatting also returns no edits if syntax
 cannot be safely matched to the full-format result or the replacement would
 produce invalid syntax. An already formatted selection returns no edits.
 
-Standalone `// btfmt: off` and `// btfmt: on` comments are protected. Selections
-whose effective range touches either directive or the disabled region return no
-edits; an unmatched `off` protects the rest of the document. Enabled neighboring
-statements remain formatable. Directive detection uses parsed line comments,
-not text embedded in strings or block comments.
+Suppression uses the same directive detection as full-document formatting (see
+[formatting suppression](configuration.md#formatting-suppression)). Selections
+whose effective range touches a disabled region, including its complete `off`
+and matching `on` lines, return no edits. An unmatched `off` protects the rest of
+the document; repeated `off` directives do not nest and unmatched `on` comments
+are ordinary comments. Enabled neighboring statements remain formatable.
+Strings, block comments, inline comments and preprocessor regions do not activate
+directives.
 
 Positions use UTF-16 code units. Reversed ranges, out-of-document positions and
 positions splitting a surrogate pair produce an `InvalidParams` error. Config
