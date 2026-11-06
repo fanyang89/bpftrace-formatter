@@ -1,0 +1,77 @@
+name: Publish Marketplace
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable GitHub Release tag
+        required: true
+        default: 'v0.4.0'
+
+concurrency:
+  group: publish-marketplace
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Download published release packages
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isDraft,isPrerelease > release.json
+          gh release download "$RELEASE_TAG" --pattern '*.vsix' --pattern checksums.txt --dir artifacts
+
+      - name: Verify release packages
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+          import zipfile
+
+          tag = os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), tag
+          release = json.loads(Path('release.json').read_text())
+          assert release['tagName'] == tag
+          assert not release['isDraft'] and not release['isPrerelease']
+          version = tag[1:]
+          root = Path('artifacts')
+          checksums = {}
+          for line in (root / 'checksums.txt').read_text().splitlines():
+              digest, name = line.split(maxsplit=1)
+              checksums[Path(name.lstrip('*')).name] = digest
+          targets = ['linux-x64', 'win32-x64', 'darwin-x64', 'darwin-arm64']
+          expected = {f'btfmt-{target}-{version}.vsix' for target in targets}
+          assert {p.name for p in root.glob('*.vsix')} == expected
+          for target in targets:
+              package = root / f'btfmt-{target}-{version}.vsix'
+              assert hashlib.sha256(package.read_bytes()).hexdigest() == checksums[package.name]
+              with zipfile.ZipFile(package) as archive:
+                  assert archive.testzip() is None
+                  manifest = json.loads(archive.read('extension/package.json'))
+                  assert (manifest['publisher'], manifest['name'], manifest['version']) == ('fanyang89', 'btfmt', version)
+                  xml = ET.fromstring(archive.read('extension.vsixmanifest'))
+                  identity = next(e for e in xml.iter() if e.tag.endswith('Identity'))
+                  assert identity.attrib['TargetPlatform'] == target
+                  assert not any(e.attrib.get('Id') == 'Microsoft.VisualStudio.Code.PreRelease' and e.attrib.get('Value') == 'true' for e in xml.iter())
+              print(f'Verified {package.name}')
+          PY
+
+      - name: Publish with Trusted Publishing
+        run: npx --yes --package=@vscode/vsce@4.1.0 vsce publish --oidc --packagePath artifacts/*.vsix

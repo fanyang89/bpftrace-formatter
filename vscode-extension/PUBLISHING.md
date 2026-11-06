@@ -12,14 +12,26 @@ Use the permanent Marketplace publisher ID `fanyang89`. The extension ID is `fan
 4. Upload each platform-specific VSIX to the Visual Studio Marketplace publisher management page as a pre-release.
 5. Install the Marketplace pre-release on at least one local and one Remote workspace before promotion.
 
-The initial Marketplace release uses manual upload so the repository does not require a long-lived Azure DevOps Personal Access Token.
+Pre-release uploads can use the publisher management page without storing a PAT.
 
 ## Stable Release
 
 1. Promote a tested pre-release by updating to the next stable version.
 2. Create a matching `v<version>` tag.
 3. Confirm the release workflow publishes the GitHub Release and all four platform-specific VSIX files.
-4. Upload the VSIX files to the Marketplace without the pre-release flag.
+4. Run `Publish Marketplace` with the matching release tag. It verifies checksums,
+   versions, publisher, and platform metadata before uploading the four existing
+   stable VSIX packages with OIDC; it does not rebuild them.
+
+```bash
+gh workflow run publish-marketplace.yml --ref main -f tag=v0.4.0
+```
+
+Configure **Trusted Publishing** on the `fanyang89` publisher with repository
+owner `fanyang89`, repository `bpftrace-formatter`, and workflow filename
+`publish-marketplace.yml`. Leave **Environment** empty. The publishing job grants
+`id-token: write` and uses `vsce` 4.1.0, which supports `publish --oidc`.
+Browser login is only needed to configure this policy, not for subsequent runs.
 
 ## Automation
 
@@ -65,4 +77,5 @@ Hosted-runner tests do not validate Remote SSH transport or a real remote instal
 
 Keep the `vsce.baseContentUrl` and `vsce.baseImagesUrl` settings in `package.json` pointed at the extension subdirectory. The Marketplace README uses these URLs for relative links and images; `vsce` otherwise assumes the repository root.
 
-Future Marketplace automation must use Microsoft Entra ID workload identity federation. Do not add a long-lived `VSCE_PAT`; global Azure DevOps PATs retire on December 1, 2026.
+Marketplace automation uses GitHub Actions Trusted Publishing. Do not add a
+long-lived `VSCE_PAT`; global Azure DevOps PATs retire on December 1, 2026.
