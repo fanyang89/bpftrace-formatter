@@ -81,6 +81,43 @@ mod tests {
     }
 
     #[test]
+    fn encoded_document_uris_share_disk_identity_through_the_lifecycle() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("symbols.bt");
+        fs::write(&file, "BEGIN { @disk = 1; }").unwrap();
+        let disk_uri = uri(&file);
+        let mut encoded = disk_uri.as_str().replace("symbols.bt", "%73ymbols.bt");
+        if cfg!(windows) {
+            // VS Code serializes drive letters in lowercase and escapes the colon.
+            let drive = &encoded[8..9];
+            encoded = format!("file:///{}%3A{}", drive.to_lowercase(), &encoded[10..]);
+        }
+        let client_uri = Url::parse(&encoded).unwrap();
+        assert_ne!(client_uri, disk_uri);
+        let mut index = WorkspaceIndex::default();
+        index.scan(&[dir.path().into()]);
+        index.set_overlay(
+            client_uri.clone(),
+            DocumentSnapshot::analyze("BEGIN { @unsaved = 1; }".into(), Some(1)).0,
+        );
+        assert_eq!(names(&index, "@"), ["@unsaved"]);
+        assert_eq!(search(&index, "@", true)[0].location.uri, client_uri);
+        assert_eq!(
+            index.program_files(&disk_uri),
+            std::slice::from_ref(&client_uri)
+        );
+        index.scan(&[dir.path().into()]);
+        assert_eq!(names(&index, "@"), ["@unsaved"]);
+        fs::write(&file, "BEGIN { @saved = 1; }").unwrap();
+        index.refresh(&client_uri);
+        assert_eq!(names(&index, "@"), ["@unsaved"]);
+        index.remove_overlay(&client_uri);
+        assert_eq!(names(&index, "@"), ["@saved"]);
+        index.remove_disk(&client_uri);
+        assert!(names(&index, "@").is_empty());
+    }
+
+    #[test]
     fn queries_return_definitions_with_stable_kinds_and_utf16_locations() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("symbols.bt");

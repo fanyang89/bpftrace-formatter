@@ -18,6 +18,7 @@ pub(super) struct WorkspaceIndex {
     roots: Vec<PathBuf>,
     disk: HashMap<Url, Arc<DocumentSnapshot>>,
     overlays: HashMap<Url, Arc<DocumentSnapshot>>,
+    overlay_uris: HashMap<Url, Url>,
     symbol_overlays: HashSet<Url>,
     forward: HashMap<Url, Vec<Url>>,
     reverse: HashMap<Url, HashSet<Url>>,
@@ -88,6 +89,9 @@ impl WorkspaceIndex {
     }
 
     pub(super) fn set_overlay(&mut self, uri: Url, snapshot: Arc<DocumentSnapshot>) {
+        let key = paths::uri_key(&uri);
+        self.overlay_uris.insert(key.clone(), uri);
+        let uri = key;
         if self.symbol_path_is_eligible(&uri) {
             self.symbol_overlays.insert(uri.clone());
         } else {
@@ -99,12 +103,17 @@ impl WorkspaceIndex {
     }
 
     pub(super) fn remove_overlay(&mut self, uri: &Url) {
+        let key = paths::uri_key(uri);
+        let uri = &key;
         self.overlays.remove(uri);
+        self.overlay_uris.remove(uri);
         self.symbol_overlays.remove(uri);
         self.rebuild_graph();
     }
 
     pub(super) fn refresh(&mut self, uri: &Url) {
+        let key = paths::uri_key(uri);
+        let uri = &key;
         let Ok(path) = uri.to_file_path() else {
             return;
         };
@@ -138,6 +147,8 @@ impl WorkspaceIndex {
     }
 
     pub(super) fn remove_disk(&mut self, uri: &Url) {
+        let key = paths::uri_key(uri);
+        let uri = &key;
         if uri.to_file_path().ok().is_some_and(|path| {
             matches!(
                 path.file_name().and_then(|name| name.to_str()),
@@ -153,6 +164,8 @@ impl WorkspaceIndex {
     }
 
     pub(super) fn snapshot(&self, uri: &Url) -> Option<Arc<DocumentSnapshot>> {
+        let key = paths::uri_key(uri);
+        let uri = &key;
         self.overlays
             .get(uri)
             .or_else(|| self.disk.get(uri))
@@ -169,7 +182,10 @@ impl WorkspaceIndex {
             .chain(self.symbol_overlays.iter())
             .collect();
         uris.into_iter()
-            .filter_map(|uri| self.snapshot(uri).map(|snapshot| (uri.clone(), snapshot)))
+            .filter_map(|uri| {
+                self.snapshot(uri)
+                    .map(|snapshot| (self.document_uri(uri), snapshot))
+            })
             .collect()
     }
 
@@ -183,6 +199,8 @@ impl WorkspaceIndex {
         if !self.ready {
             return Vec::new();
         }
+        let key = paths::uri_key(uri);
+        let uri = &key;
         let roots = self.reverse_roots(uri);
         let starts = if roots.is_empty() {
             vec![uri.clone()]
@@ -193,13 +211,20 @@ impl WorkspaceIndex {
         for start in starts {
             self.collect_forward(&start, &mut files);
         }
-        let mut files: Vec<_> = files.into_iter().collect();
+        let mut files: Vec<_> = files
+            .into_iter()
+            .map(|uri| self.document_uri(&uri))
+            .collect();
         files.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         files
     }
 
     pub(super) fn ready_for_rename(&self) -> bool {
         self.ready && !self.incomplete
+    }
+
+    fn document_uri(&self, key: &Url) -> Url {
+        self.overlay_uris.get(key).unwrap_or(key).clone()
     }
 
     pub(super) fn is_incomplete(&self) -> bool {

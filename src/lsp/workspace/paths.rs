@@ -3,6 +3,13 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use tower_lsp::lsp_types::Url;
 
+pub(super) fn uri_key(uri: &Url) -> Url {
+    uri.to_file_path()
+        .ok()
+        .and_then(|path| Url::from_file_path(path).ok())
+        .unwrap_or_else(|| uri.clone())
+}
+
 pub(super) fn canonicalize(path: &Path) -> Option<PathBuf> {
     let path = fs::canonicalize(path).ok()?;
     // Windows canonical paths use a verbatim prefix (\\?\), while LSP file
