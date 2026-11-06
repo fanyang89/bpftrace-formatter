@@ -17,9 +17,9 @@ on:
 
 jobs:
   validate-version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate release versions
         env:
@@ -42,9 +42,9 @@ jobs:
 
   test:
     needs: validate-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -55,7 +55,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20.18.1'
           cache: npm
@@ -96,7 +96,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: linux
             arch: amd64
             vscode_target: linux-x64
@@ -118,7 +118,7 @@ jobs:
             binary_name: btfmt.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -127,7 +127,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20.18.1'
           cache: npm
@@ -159,7 +159,7 @@ jobs:
           "ARCHIVE_NAME=$archiveName" >> $env:GITHUB_ENV
 
       - name: Upload binary archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: btfmt-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARCHIVE_NAME }}
@@ -183,7 +183,7 @@ jobs:
         run: node scripts/package.mjs "${{ matrix.vscode_target }}" "../target/release/${{ matrix.binary_name }}" release
 
       - name: Upload extension artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vscode-extension-${{ matrix.vscode_target }}
           path: vscode-extension/*.vsix
@@ -191,16 +191,16 @@ jobs:
 
   release:
     needs: build-binaries
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts/downloads
 
@@ -212,7 +212,7 @@ jobs:
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: v2.17.0
@@ -222,14 +222,14 @@ jobs:
 
       - name: Build snapshot release bundle
         if: github.event_name == 'workflow_dispatch'
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: v2.17.0
           args: release --snapshot --clean
 
       - name: Upload release bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-files
           path: |
